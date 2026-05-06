@@ -3,6 +3,10 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import { TEMPLATE_CONFIG } from './src/config/template.config';
 
+if (import.meta.env.DEV) {
+  import("react-grab");
+}
+
 // Injeta configurações de SEO dinamicamente
 document.title = TEMPLATE_CONFIG.pageTitle;
 const metaDescription = document.querySelector('meta[name="description"]');

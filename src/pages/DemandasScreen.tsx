@@ -13,6 +13,7 @@ const formatDate = (dateString: string) => {
 type Demanda = {
   id: string;
   data_demanda: string;
+  pessoa_id: string | null;
   solicitante: string;
   descricao: string;
   assessor: string | null;
@@ -30,6 +31,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 const DEFAULT_FORM = {
   data_demanda: new Date().toISOString().split('T')[0],
+  pessoa_id: '' as string,
   solicitante: '',
   descricao: '',
   assessor: '',
@@ -54,10 +56,11 @@ export default function DemandasScreen() {
 
   const [pendingStatusChange, setPendingStatusChange] = useState<{ id: string; status: Demanda['status'] } | null>(null);
   const [motivoPrompt, setMotivoPrompt] = useState('');
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   // Autocomplete Pessoas
   const [pessoasQuery, setPessoasQuery] = useState('');
-  const [pessoasResult, setPessoasResult] = useState<{full_name: string}[]>([]);
+  const [pessoasResult, setPessoasResult] = useState<{id: string; full_name: string; phone: string | null}[]>([]);
   const [showPessoasDropdown, setShowPessoasDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -81,11 +84,16 @@ export default function DemandasScreen() {
       setLoading(true);
       const { data, error } = await supabase
         .from('demandas')
-        .select('*')
+        .select('*, pessoa:pessoa_id(id, full_name)')
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setDemandas(data || []);
+      // Resolve o nome do solicitante a partir do relacionamento
+      const resolved = (data || []).map((d: any) => ({
+        ...d,
+        solicitante: d.pessoa?.full_name || d.solicitante || '',
+      }));
+      setDemandas(resolved);
     } catch (e: any) {
       console.error('Erro ao buscar demandas:', e);
     } finally {
@@ -95,7 +103,8 @@ export default function DemandasScreen() {
 
   const handlePessoasSearch = async (query: string) => {
     setPessoasQuery(query);
-    setForm({ ...form, solicitante: query });
+    // Limpa o pessoa_id se o usuário digitar manualmente
+    setForm(prev => ({ ...prev, solicitante: query, pessoa_id: '' }));
     
     if (query.trim().length < 2) {
       setPessoasResult([]);
@@ -106,9 +115,10 @@ export default function DemandasScreen() {
     try {
       const { data } = await supabase
         .from('pessoa')
-        .select('full_name')
+        .select('id, full_name, phone')
         .ilike('full_name', `%${query}%`)
-        .limit(5);
+        .order('full_name')
+        .limit(8);
 
       if (data && data.length > 0) {
         setPessoasResult(data);
@@ -122,9 +132,9 @@ export default function DemandasScreen() {
     }
   };
 
-  const selectPessoa = (nome: string) => {
-    setPessoasQuery(nome);
-    setForm({ ...form, solicitante: nome });
+  const selectPessoa = (pessoa: {id: string; full_name: string}) => {
+    setPessoasQuery(pessoa.full_name);
+    setForm(prev => ({ ...prev, solicitante: pessoa.full_name, pessoa_id: pessoa.id }));
     setShowPessoasDropdown(false);
   };
 
@@ -133,6 +143,7 @@ export default function DemandasScreen() {
       setEditingId(demanda.id);
       setForm({
         data_demanda: demanda.data_demanda,
+        pessoa_id: demanda.pessoa_id || '',
         solicitante: demanda.solicitante,
         descricao: demanda.descricao,
         assessor: demanda.assessor || '',
@@ -149,13 +160,17 @@ export default function DemandasScreen() {
     setIsModalOpen(true);
   };
 
-  const handleDelete = async (id: string) => {
-    if (!window.confirm('Tem certeza que deseja excluir esta demanda?')) return;
-    
+  const handleDelete = (id: string) => {
+    setDeleteId(id);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteId) return;
     try {
-      const { error } = await supabase.from('demandas').delete().eq('id', id);
+      const { error } = await supabase.from('demandas').delete().eq('id', deleteId);
       if (error) throw error;
-      setDemandas(prev => prev.filter(d => d.id !== id));
+      setDemandas(prev => prev.filter(d => d.id !== deleteId));
+      setDeleteId(null);
     } catch (e: any) {
       alert('Erro ao excluir: ' + e.message);
     }
@@ -217,8 +232,8 @@ export default function DemandasScreen() {
     e.preventDefault();
     setError(null);
 
-    if (!form.data_demanda || !form.solicitante || !form.descricao || !form.status) {
-      setError('Preencha todos os campos obrigatórios (*).');
+    if (!form.data_demanda || !form.pessoa_id || !form.descricao || !form.status) {
+      setError('Preencha todos os campos obrigatórios (*). Selecione um solicitante da lista.');
       return;
     }
 
@@ -229,6 +244,7 @@ export default function DemandasScreen() {
 
     const payload = {
       data_demanda: form.data_demanda,
+      pessoa_id: form.pessoa_id,
       solicitante: form.solicitante.trim(),
       descricao: form.descricao.trim(),
       assessor: form.assessor?.trim() || null,
@@ -257,7 +273,7 @@ export default function DemandasScreen() {
 
   const filteredDemandas = demandas.filter(d => {
     const matchesSearch = 
-      d.solicitante.toLowerCase().includes(searchTerm.toLowerCase()) || 
+      (d.solicitante || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
       d.descricao.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (d.assessor?.toLowerCase() || '').includes(searchTerm.toLowerCase());
     
@@ -533,26 +549,37 @@ export default function DemandasScreen() {
                     <input
                       type="text"
                       required
-                      placeholder="Nome do solicitante"
+                      placeholder="Busque uma pessoa cadastrada..."
                       value={pessoasQuery}
                       onChange={(e) => handlePessoasSearch(e.target.value)}
-                      className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-white"
+                      className={`w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 dark:text-white ${form.pessoa_id ? 'border-green-400 dark:border-green-600' : 'border-slate-200 dark:border-slate-700'}`}
                     />
+                    {form.pessoa_id && (
+                      <p className="text-xs text-green-600 dark:text-green-400 mt-1 flex items-center gap-1">
+                        <CheckCircle2 className="h-3 w-3" /> Pessoa vinculada
+                      </p>
+                    )}
+                    {!form.pessoa_id && pessoasQuery.length > 0 && !showPessoasDropdown && (
+                      <p className="text-xs text-amber-600 dark:text-amber-400 mt-1 flex items-center gap-1">
+                        <AlertCircle className="h-3 w-3" /> Selecione uma pessoa da lista
+                      </p>
+                    )}
                     {/* Autocomplete Dropdown */}
                     <AnimatePresence>
                       {showPessoasDropdown && pessoasResult.length > 0 && (
                         <motion.div
                           initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
-                          className="absolute z-10 w-full mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg overflow-hidden"
+                          className="absolute z-10 w-full mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg overflow-hidden max-h-64 overflow-y-auto"
                         >
-                          {pessoasResult.map((p, idx) => (
+                          {pessoasResult.map((p) => (
                             <button
-                              key={idx}
+                              key={p.id}
                               type="button"
-                              onClick={() => selectPessoa(p.full_name)}
-                              className="w-full text-left px-4 py-2.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-700/50 text-slate-700 dark:text-slate-300 transition-colors"
+                              onClick={() => selectPessoa(p)}
+                              className="w-full text-left px-4 py-2.5 hover:bg-blue-50 dark:hover:bg-slate-700/50 transition-colors border-b border-slate-100 dark:border-slate-700/50 last:border-b-0"
                             >
-                              {p.full_name}
+                              <span className="text-sm font-medium text-slate-900 dark:text-white">{p.full_name}</span>
+                              {p.phone && <span className="text-xs text-slate-400 ml-2">({p.phone})</span>}
                             </button>
                           ))}
                         </motion.div>
@@ -699,6 +726,54 @@ export default function DemandasScreen() {
                 >
                   {saving && <Loader2 className="h-4 w-4 animate-spin" />}
                   Confirmar
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal de Confirmação de Exclusão */}
+      <AnimatePresence>
+        {deleteId && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setDeleteId(null)}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 10 }}
+              className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl shadow-2xl overflow-hidden"
+            >
+              <div className="p-6 text-center">
+                <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Trash2 className="h-8 w-8 text-red-600 dark:text-red-500" />
+                </div>
+                <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">
+                  Excluir Demanda
+                </h3>
+                <p className="text-slate-500 dark:text-slate-400">
+                  Tem certeza que deseja excluir esta demanda? Esta ação não pode ser desfeita.
+                </p>
+              </div>
+              <div className="p-5 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setDeleteId(null)}
+                  className="px-5 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors border border-slate-200 dark:border-slate-700"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={confirmDelete}
+                  className="px-5 py-2.5 text-sm font-medium bg-red-600 hover:bg-red-700 text-white rounded-xl transition-colors shadow-sm shadow-red-500/20"
+                >
+                  Excluir Demanda
                 </button>
               </div>
             </motion.div>

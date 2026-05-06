@@ -184,6 +184,13 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children, onLogout })
     }
   }, [profile?.theme]);
 
+  // Regra: Sempre que navegar para um menu fora de Configurações, recolhe o menu config
+  useEffect(() => {
+    if (activeMenu && !activeMenu.startsWith('config/')) {
+      setConfigOpen(false);
+    }
+  }, [activeMenu]);
+
   const toggleDarkMode = () => {
     const nextTheme = !isDarkMode ? 'dark' : 'light';
     setIsDarkMode(nextTheme === 'dark');
