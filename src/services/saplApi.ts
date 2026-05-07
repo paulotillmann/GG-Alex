@@ -1,5 +1,3 @@
-import { supabase } from '../lib/supabase';
-
 const SAPL_BASE_URL = 'https://sapl.araguari.mg.leg.br';
 
 export interface SaplMateria {
@@ -14,14 +12,25 @@ export interface SaplMateria {
   tramitacao_set?: any[];
 }
 
+// Estrutura real da API do SAPL (diferente de APIs Django REST padrão)
 export interface SaplApiResponse {
-  count: number;
-  next: string | null;
-  previous: string | null;
+  pagination: {
+    links: {
+      next: string | null;
+      previous: string | null;
+    };
+    previous_page: number | null;
+    next_page: number | null;
+    start_index: number;
+    end_index: number;
+    total_entries: number;
+    total_pages: number;
+    page: number;
+  };
   results: SaplMateria[];
 }
 
-// Credenciais (idealmente em variáveis de ambiente, mas como solicitado pelo user, usaremos fixo para a primeira integração)
+// Credenciais
 const USERNAME = 'alex';
 const PASSWORD = 'Mudar@123';
 
@@ -40,12 +49,11 @@ export async function fetchAllSaplRequerimentos(
 
   const PAGE_SIZE = 100;
   let page = 1;
-  let totalCount = 0;
-  let hasMore = true;
+  let totalPages = 1;
+  let totalEntries = 0;
 
-  while (hasMore) {
+  while (page <= totalPages) {
     try {
-      // Construir URL manualmente para evitar problemas com o link 'next' que vem em http://
       const url = `${SAPL_BASE_URL}/api/materia/materialegislativa/?autores=71&tipo=1&page_size=${PAGE_SIZE}&page=${page}`;
 
       const response = await fetch(url, { headers });
@@ -54,18 +62,19 @@ export async function fetchAllSaplRequerimentos(
       }
 
       const data: SaplApiResponse = await response.json();
-      totalCount = data.count;
       
+      // Extrair dados de paginação da estrutura real da API
+      totalEntries = data.pagination.total_entries;
+      totalPages = data.pagination.total_pages;
+
       if (data.results && Array.isArray(data.results)) {
         allMaterias.push(...data.results);
       }
 
       if (onProgress) {
-        onProgress(allMaterias.length, totalCount);
+        onProgress(allMaterias.length, totalEntries);
       }
 
-      // Verificar se há mais páginas
-      hasMore = data.next !== null && allMaterias.length < totalCount;
       page++;
     } catch (err) {
       console.error(`Erro ao buscar página ${page} do SAPL:`, err);
@@ -80,14 +89,13 @@ export async function fetchAllSaplRequerimentos(
  * Faz o mapeamento de um objeto vindo do SAPL para o formato do Supabase
  */
 export function mapSaplToRequerimento(sapl: SaplMateria, userId: string) {
-  // Concatena numero/ano como chave única (ex: "001/2025")
   const numero_requerimento = `${String(sapl.numero).padStart(3, '0')}/${sapl.ano}`;
 
   return {
     numero_requerimento,
     titulo: sapl.ementa || 'Sem ementa',
     data_sessao: sapl.data_apresentacao || new Date().toISOString().split('T')[0],
-    status: 'Apresentado', // Status padrão inicial, pode ser atualizado pelas tramitações se necessário
+    status: 'Apresentado',
     resposta_recebida: null,
     pessoa_id: null,
     informacoes_adicionais: `Importado do SAPL (ID: ${sapl.id})`,
