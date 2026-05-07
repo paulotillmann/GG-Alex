@@ -18,6 +18,7 @@ import RequerimentoForm, {
 import {
   fetchAllBubbleRequerimentos, mapBubbleRequerimento, downloadAndUploadPdf, SyncResult,
 } from '../services/bubbleApi';
+import { fetchAllSaplRequerimentos, mapSaplToRequerimento } from '../services/saplApi';
 
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -76,6 +77,14 @@ const RequerimentosScreen: React.FC = () => {
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncPhase, setSyncPhase] = useState<'idle' | 'fetching' | 'pdfs' | 'done'>('idle');
+
+  // ── SAPL Sync State ───────────────────────────────────────────────────────
+  const [showSaplModal, setShowSaplModal] = useState(false);
+  const [saplLoading, setSaplLoading] = useState(false);
+  const [saplProgress, setSaplProgress] = useState<{ fetched: number; total: number; current: number }>({ fetched: 0, total: 0, current: 0 });
+  const [saplResult, setSaplResult] = useState<{ total: number; inserted: number; updated: number; errors: number; } | null>(null);
+  const [saplError, setSaplError] = useState<string | null>(null);
+  const [saplPhase, setSaplPhase] = useState<'idle' | 'fetching' | 'syncing' | 'done'>('idle');
 
 
   // Filtros
@@ -425,6 +434,110 @@ const RequerimentosScreen: React.FC = () => {
     }
   };
 
+  // ── SAPL Sync Handler ────────────────────────────────────────────────────
+  const syncFromSapl = async () => {
+    setSaplLoading(true);
+    setSaplResult(null);
+    setSaplError(null);
+    setSaplProgress({ fetched: 0, total: 0, current: 0 });
+    setSaplPhase('fetching');
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const userId = session?.user?.id ?? null;
+      if (!userId) throw new Error('Usuário não autenticado. Faça login e tente novamente.');
+
+      const saplRecords = await fetchAllSaplRequerimentos((fetched, total) => {
+        setSaplProgress(p => ({ ...p, fetched, total }));
+      });
+
+      setSaplPhase('syncing');
+
+      const result = { total: saplRecords.length, inserted: 0, updated: 0, errors: 0 };
+
+      // Buscar requerimentos existentes para comparação
+      const { data: existing } = await supabase.from('requerimento').select('id, numero_requerimento');
+      const existingMap = new Map((existing ?? []).map((r: any) => [r.numero_requerimento, r.id]));
+
+      for (let i = 0; i < saplRecords.length; i++) {
+        const sapl = saplRecords[i];
+        setSaplProgress(p => ({ ...p, current: i + 1 }));
+
+        const mapped = mapSaplToRequerimento(sapl, userId);
+        const existingId = existingMap.get(mapped.numero_requerimento);
+        let requerimentoId = existingId;
+
+        if (existingId) {
+          // UPDATE
+          const { error: updErr } = await supabase
+            .from('requerimento')
+            .update({
+              titulo: mapped.titulo,
+              data_sessao: mapped.data_sessao,
+              status: mapped.status,
+              informacoes_adicionais: mapped.informacoes_adicionais
+            })
+            .eq('id', existingId);
+            
+          if (updErr) {
+            console.error('[SAPL Sync] Erro ao atualizar:', updErr);
+            result.errors++;
+          } else {
+            result.updated++;
+          }
+        } else {
+          // INSERT
+          const { data: inserted, error: insErr } = await supabase
+            .from('requerimento')
+            .insert(mapped)
+            .select('id')
+            .single();
+
+          if (insErr || !inserted) {
+            console.error('[SAPL Sync] Erro ao inserir:', insErr);
+            result.errors++;
+          } else {
+            requerimentoId = inserted.id;
+            result.inserted++;
+          }
+        }
+
+        // PDFs (URL Direta do SAPL)
+        if (requerimentoId && sapl.texto_original) {
+          let arquivoUrl = sapl.texto_original;
+          if (!arquivoUrl.startsWith('http')) {
+            arquivoUrl = `https://sapl.araguari.mg.leg.br${arquivoUrl}`;
+          }
+
+          // Verifica se o arquivo já existe para não duplicar
+          const { data: arqs } = await supabase
+            .from('requerimento_arquivos')
+            .select('id')
+            .eq('requerimento_id', requerimentoId)
+            .eq('arquivo_url', arquivoUrl);
+
+          if (!arqs || arqs.length === 0) {
+            const nome_arquivo = arquivoUrl.split('/').pop() || `sapl_${sapl.id}.pdf`;
+            await supabase.from('requerimento_arquivos').insert({
+              requerimento_id: requerimentoId,
+              nome_arquivo: nome_arquivo,
+              arquivo_url: arquivoUrl,
+              tamanho_bytes: null,
+            });
+          }
+        }
+      }
+
+      setSaplPhase('done');
+      setSaplResult(result);
+      if (result.inserted > 0 || result.updated > 0) fetchData();
+    } catch (err: unknown) {
+      setSaplError(err instanceof Error ? err.message : 'Erro desconhecido ao sincronizar do SAPL.');
+    } finally {
+      setSaplLoading(false);
+    }
+  };
+
   const generatePDF = () => {
 
     const doc = new jsPDF('landscape');
@@ -508,6 +621,14 @@ const RequerimentosScreen: React.FC = () => {
           >
             <RefreshCw className={`h-4 w-4 sm:mr-2 ${loading ? 'animate-spin text-blue-500' : ''}`} /> 
             <span className="hidden sm:inline">Atualizar</span>
+          </button>
+
+          <button
+            onClick={() => setShowSaplModal(true)}
+            className="flex items-center px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
+          >
+            <CloudDownload className="h-4 w-4 sm:mr-2" /> 
+            <span className="hidden sm:inline">Importar SAPL</span>
           </button>
 
           <button
@@ -1233,6 +1354,125 @@ const RequerimentosScreen: React.FC = () => {
                   )}
                   <button
                     onClick={() => setShowSyncModal(false)}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-semibold transition-colors"
+                  >
+                    <CheckCircle className="h-4 w-4" /> Concluído
+                  </button>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+        {/* SAPL Sync Modal */}
+        {showSaplModal && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl shadow-2xl p-6"
+            >
+              {/* Header */}
+              <div className="flex items-center gap-3 mb-5">
+                <div className="h-11 w-11 rounded-xl bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center shrink-0">
+                  <CloudDownload className="h-6 w-6 text-emerald-600 dark:text-emerald-400" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">Importar do SAPL</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Sincroniza requerimentos diretamente do portal oficial.</p>
+                </div>
+              </div>
+
+              {/* Idle */}
+              {!saplLoading && !saplResult && !saplError && (
+                <div className="space-y-4">
+                  <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 text-sm text-slate-600 dark:text-slate-400 space-y-1.5">
+                    <p>• <strong>Novos requerimentos</strong> serão inseridos.</p>
+                    <p>• Requerimentos existentes serão <strong>atualizados</strong> com as informações do portal.</p>
+                    <p>• Links dos PDFs originais serão adicionados sem consumo de armazenamento.</p>
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setShowSaplModal(false)}
+                      className="flex-1 px-4 py-2.5 text-sm font-medium border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={syncFromSapl}
+                      className="flex-1 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-2"
+                    >
+                      <RefreshCw className="h-4 w-4" /> Iniciar Importação
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Loading */}
+              {saplLoading && (
+                <div className="text-center space-y-4 py-4">
+                  <Loader2 className="h-10 w-10 text-emerald-500 animate-spin mx-auto" />
+                  <div>
+                    <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+                      {saplPhase === 'fetching' ? 'Buscando registros na API SAPL...' : 'Sincronizando com Supabase...'}
+                    </p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                      {saplPhase === 'fetching'
+                        ? `${saplProgress.fetched} de ${saplProgress.total} registros lidos`
+                        : `${saplProgress.current} de ${saplProgress.total} processados`
+                      }
+                    </p>
+                  </div>
+                  <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                    <div 
+                      className="h-2 bg-emerald-500 rounded-full transition-all duration-300" 
+                      style={{ width: `${saplPhase === 'fetching' ? (saplProgress.fetched / (saplProgress.total || 1)) * 100 : (saplProgress.current / (saplProgress.total || 1)) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Error */}
+              {saplError && !saplLoading && (
+                <div className="space-y-4">
+                  <div className="p-4 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-sm text-red-700 dark:text-red-400">
+                    <p className="font-semibold mb-1">Erro na sincronização</p>
+                    <p className="text-xs">{saplError}</p>
+                  </div>
+                  <button
+                    onClick={() => setShowSaplModal(false)}
+                    className="w-full px-4 py-2.5 text-sm font-medium border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                  >
+                    Fechar
+                  </button>
+                </div>
+              )}
+
+              {/* Success */}
+              {saplResult && !saplLoading && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="text-center p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
+                      <p className="text-2xl font-bold text-slate-800 dark:text-slate-200">{saplResult.total}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">Total SAPL</p>
+                    </div>
+                    <div className="text-center p-3 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800">
+                      <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{saplResult.inserted}</p>
+                      <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-0.5">Novos Inseridos</p>
+                    </div>
+                    <div className="text-center p-3 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
+                      <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{saplResult.updated}</p>
+                      <p className="text-xs text-blue-600 dark:text-blue-400 mt-0.5">Atualizados</p>
+                    </div>
+                    {saplResult.errors > 0 && (
+                      <div className="text-center p-3 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+                        <p className="text-2xl font-bold text-red-600 dark:text-red-400">{saplResult.errors}</p>
+                        <p className="text-xs text-red-600 dark:text-red-400 mt-0.5">Com Erro</p>
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => setShowSaplModal(false)}
                     className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-semibold transition-colors"
                   >
                     <CheckCircle className="h-4 w-4" /> Concluído
