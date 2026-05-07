@@ -10,7 +10,7 @@ export interface SaplMateria {
   ementa: string;
   data_apresentacao: string;
   texto_original: string | null;
-  // Outros campos podem vir na resposta, focamos nos principais
+  autores?: number[];
   tramitacao_set?: any[];
 }
 
@@ -34,8 +34,9 @@ export async function fetchAllSaplRequerimentos(
 ): Promise<SaplMateria[]> {
   const allMaterias: SaplMateria[] = [];
   
-  // Endpoint inicial: autor=71 (Alex), tipo=1 (Requerimento)
-  let nextUrl: string | null = `${SAPL_BASE_URL}/api/materia/materialegislativa/?autor=71&tipo=1`;
+  // Endpoint inicial: autores=71 (Alex), tipo=1 (Requerimento)
+  // IMPORTANTE: O parâmetro correto é 'autores' (plural). 'autor' (singular) é ignorado pela API.
+  let nextUrl: string | null = `${SAPL_BASE_URL}/api/materia/materialegislativa/?autores=71&tipo=1`;
 
   // Autenticação Basic Auth temporária (SAPL aceita auth para APIs fechadas, mas matérias geralmente são públicas)
   // Vamos enviar por precaução para garantir acesso completo
@@ -58,7 +59,12 @@ export async function fetchAllSaplRequerimentos(
       const data: SaplApiResponse = await response.json();
       
       if (data.results && Array.isArray(data.results)) {
-        allMaterias.push(...data.results);
+        // Filtro de segurança: garantir que apenas matérias do autor 71 (Alex) sejam incluídas
+        const filtered = data.results.filter(m => {
+          if (!m.autores || !Array.isArray(m.autores)) return true; // se não tem campo autores, aceita (veio do filtro da API)
+          return m.autores.includes(71);
+        });
+        allMaterias.push(...filtered);
       }
 
       if (onProgress) {
