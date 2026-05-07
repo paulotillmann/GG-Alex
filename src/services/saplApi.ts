@@ -34,47 +34,42 @@ export async function fetchAllSaplRequerimentos(
 ): Promise<SaplMateria[]> {
   const allMaterias: SaplMateria[] = [];
   
-  // Endpoint inicial: autores=71 (Alex), tipo=1 (Requerimento), page_size=100 (otimizar paginação)
-  // IMPORTANTE: O parâmetro correto é 'autores' (plural). 'autor' (singular) é ignorado pela API.
-  let nextUrl: string | null = `${SAPL_BASE_URL}/api/materia/materialegislativa/?autores=71&tipo=1&page_size=100`;
-
-  // Autenticação Basic Auth temporária (SAPL aceita auth para APIs fechadas, mas matérias geralmente são públicas)
-  // Vamos enviar por precaução para garantir acesso completo
   const headers = new Headers();
   headers.set('Authorization', 'Basic ' + btoa(`${USERNAME}:${PASSWORD}`));
   headers.set('Accept', 'application/json');
 
-  while (nextUrl) {
-    try {
-      // Garantir que a URL force HTTPS
-      if (nextUrl.startsWith('http://')) {
-        nextUrl = nextUrl.replace('http://', 'https://');
-      }
+  const PAGE_SIZE = 100;
+  let page = 1;
+  let totalCount = 0;
+  let hasMore = true;
 
-      const response = await fetch(nextUrl, { headers });
+  while (hasMore) {
+    try {
+      // Construir URL manualmente para evitar problemas com o link 'next' que vem em http://
+      const url = `${SAPL_BASE_URL}/api/materia/materialegislativa/?autores=71&tipo=1&page_size=${PAGE_SIZE}&page=${page}`;
+
+      const response = await fetch(url, { headers });
       if (!response.ok) {
         throw new Error(`Erro na API SAPL: ${response.status} ${response.statusText}`);
       }
 
       const data: SaplApiResponse = await response.json();
+      totalCount = data.count;
       
       if (data.results && Array.isArray(data.results)) {
-        // Filtro de segurança: garantir que apenas matérias do autor 71 (Alex) sejam incluídas
-        const filtered = data.results.filter(m => {
-          if (!m.autores || !Array.isArray(m.autores)) return true; // se não tem campo autores, aceita (veio do filtro da API)
-          return m.autores.includes(71);
-        });
-        allMaterias.push(...filtered);
+        allMaterias.push(...data.results);
       }
 
       if (onProgress) {
-        onProgress(allMaterias.length, data.count);
+        onProgress(allMaterias.length, totalCount);
       }
 
-      nextUrl = data.next;
+      // Verificar se há mais páginas
+      hasMore = data.next !== null && allMaterias.length < totalCount;
+      page++;
     } catch (err) {
-      console.error('Erro ao buscar dados do SAPL:', err);
-      break; // Interrompe em caso de erro, mas retorna o que já foi buscado
+      console.error(`Erro ao buscar página ${page} do SAPL:`, err);
+      break;
     }
   }
 
