@@ -34,9 +34,9 @@ export async function fetchAllSaplRequerimentos(
 ): Promise<SaplMateria[]> {
   const allMaterias: SaplMateria[] = [];
   
-  // Endpoint inicial: autores=71 (Alex), tipo=1 (Requerimento)
+  // Endpoint inicial: autores=71 (Alex), tipo=1 (Requerimento), page_size=100 (otimizar paginação)
   // IMPORTANTE: O parâmetro correto é 'autores' (plural). 'autor' (singular) é ignorado pela API.
-  let nextUrl: string | null = `${SAPL_BASE_URL}/api/materia/materialegislativa/?autores=71&tipo=1`;
+  let nextUrl: string | null = `${SAPL_BASE_URL}/api/materia/materialegislativa/?autores=71&tipo=1&page_size=100`;
 
   // Autenticação Basic Auth temporária (SAPL aceita auth para APIs fechadas, mas matérias geralmente são públicas)
   // Vamos enviar por precaução para garantir acesso completo
