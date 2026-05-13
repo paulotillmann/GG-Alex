@@ -22,6 +22,7 @@ export interface AgendaItem {
   created_at: string;
   updated_at: string;
   celular_agendado?: string | null;
+  status: string | null;
   // join
   pessoa?: { full_name: string } | null;
 }
@@ -47,6 +48,11 @@ const TIPO_COLORS: Record<string, string> = {
   'Outros':  'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400',
 };
 
+export const STATUS_COLORS: Record<string, string> = {
+  'resolvendo': 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400',
+  'concluído': 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400',
+  'não resolvido': 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400'
+};
 const Toggle: React.FC<{ checked: boolean; onChange: (v: boolean) => void; label: string }> =
   ({ checked, onChange, label }) => (
     <label className="flex items-center gap-3 cursor-pointer select-none">
@@ -79,6 +85,7 @@ const AgendaForm: React.FC<AgendaFormProps> = ({ initialData, mode, onClose, onS
   const [pessoaId, setPessoaId]         = useState(initialData?.pessoa_id ?? '');
   const [descricao, setDescricao]       = useState(initialData?.descricao ?? '');
   const [lembrar, setLembrar]           = useState(initialData?.lembrar ?? false);
+  const [status, setStatus]             = useState(initialData?.status ?? '');
 
   useEffect(() => {
     supabase.from('pessoa').select('id, full_name, person_type').order('full_name').then(({ data }) => {
@@ -110,6 +117,7 @@ const AgendaForm: React.FC<AgendaFormProps> = ({ initialData, mode, onClose, onS
       pessoa_id:    pessoaId    || null,
       descricao:    descricao.trim() || null,
       lembrar,
+      status:       status || null,
       user_id:      user?.id ?? null,
       celular_agendado: celularAgendado.trim() || null,
     };
@@ -196,6 +204,25 @@ const AgendaForm: React.FC<AgendaFormProps> = ({ initialData, mode, onClose, onS
                   {tipo}
                 </span>
               )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                Status
+              </label>
+              <div className="relative">
+                <Tag className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                <select
+                  value={status}
+                  onChange={e => setStatus(e.target.value)}
+                  className="w-full pl-9 pr-4 py-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm appearance-none"
+                >
+                  <option value="">Selecione o status</option>
+                  <option value="resolvendo">Resolvendo</option>
+                  <option value="concluído">Concluído</option>
+                  <option value="não resolvido">Não Resolvido</option>
+                </select>
+              </div>
             </div>
 
             <div>

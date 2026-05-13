@@ -7,7 +7,7 @@ import {
   Bell, Clock, AlertCircle,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import AgendaForm, { AgendaItem, TIPO_COLORS } from '../components/forms/AgendaForm';
+import AgendaForm, { AgendaItem, TIPO_COLORS, STATUS_COLORS } from '../components/forms/AgendaForm';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const WEEKDAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
@@ -251,6 +251,16 @@ const AgendaScreen: React.FC = () => {
   const toggleSelect = (id: string) =>
     setSelectedIds(prev => prev.includes(id) ? prev.filter(s => s !== id) : [...prev, id]);
 
+  const handleStatusChange = async (id: string, newStatus: string) => {
+    try {
+      await supabase.from('agenda').update({ status: newStatus || null }).eq('id', id);
+      fetchData(false);
+    } catch (err: any) {
+      console.error(err);
+      showSuccess(`Erro ao atualizar status: ${err.message}`);
+    }
+  };
+
   const toggleSelectAll = () => {
     const ids = paginated.map(i => i.id);
     const allSel = ids.length > 0 && ids.every(id => selectedIds.includes(id));
@@ -455,9 +465,22 @@ const AgendaScreen: React.FC = () => {
                         )}
                         {item.lembrar && <Bell className="h-3 w-3 text-red-500" />}
                       </div>
-                      <p className={`text-sm font-semibold truncate ${isPast ? 'text-slate-500 dark:text-slate-400 line-through' : 'text-slate-900 dark:text-white'}`}>
-                        {item.titulo_compromisso}
-                      </p>
+                      <div className="flex items-center gap-2 mb-1">
+                        <p className={`text-sm font-semibold truncate ${isPast ? 'text-slate-500 dark:text-slate-400 line-through' : 'text-slate-900 dark:text-white'}`}>
+                          {item.titulo_compromisso}
+                        </p>
+                        <select
+                          value={item.status?.toLowerCase() || ''}
+                          onChange={(e) => handleStatusChange(item.id, e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          className={`appearance-none cursor-pointer px-1.5 py-0.5 rounded-full text-[10px] font-bold uppercase focus:outline-none text-center transition-colors ${item.status ? (STATUS_COLORS[item.status?.toLowerCase()] || 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300') : 'bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700'}`}
+                        >
+                          <option value="" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200">—</option>
+                          <option value="resolvendo" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200">RESOLVENDO</option>
+                          <option value="concluído" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200">CONCLUÍDO</option>
+                          <option value="não resolvido" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200">NÃO RESOLVIDO</option>
+                        </select>
+                      </div>
                       {item.local && (
                         <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1 mt-0.5">
                           <MapPin className="h-3 w-3" /> {item.local}
@@ -621,6 +644,9 @@ const AgendaScreen: React.FC = () => {
                     Local / Pessoa
                   </th>
                   <th className="px-4 py-3 text-center text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">
+                    Status
+                  </th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">
                     Lembrar
                   </th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">
@@ -672,6 +698,19 @@ const AgendaScreen: React.FC = () => {
                             </p>
                           )}
                         </div>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <select
+                          value={item.status?.toLowerCase() || ''}
+                          onChange={(e) => handleStatusChange(item.id, e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          className={`appearance-none cursor-pointer px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider focus:outline-none text-center transition-colors ${item.status ? (STATUS_COLORS[item.status?.toLowerCase()] || 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300') : 'bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700'}`}
+                        >
+                          <option value="" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200">— STATUS —</option>
+                          <option value="resolvendo" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200">RESOLVENDO</option>
+                          <option value="concluído" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200">CONCLUÍDO</option>
+                          <option value="não resolvido" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200">NÃO RESOLVIDO</option>
+                        </select>
                       </td>
                       <td className="px-4 py-3 text-center">
                         {item.lembrar

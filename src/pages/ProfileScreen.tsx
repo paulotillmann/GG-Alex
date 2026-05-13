@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { User, Mail, Phone, Calendar, Shield, Camera, Edit2, Loader2, Check } from 'lucide-react';
+import { User, Mail, Phone, Calendar, Shield, Camera, Edit2, Loader2, Check, Bell } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 
@@ -12,6 +12,7 @@ const ProfileScreen: React.FC = () => {
   const [formData, setFormData] = useState({
     full_name: '',
     telefone: '',
+    receber_lembrete_agenda: false,
   });
   
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
@@ -30,6 +31,7 @@ const ProfileScreen: React.FC = () => {
     setFormData({
       full_name: profile?.full_name ?? '',
       telefone: profile?.telefone ? maskTelefone(profile.telefone) : '',
+      receber_lembrete_agenda: profile?.receber_lembrete_agenda ?? false,
     });
     setAvatarFile(null);
     setAvatarPreview(null);
@@ -84,6 +86,7 @@ const ProfileScreen: React.FC = () => {
         .update({
           full_name: formData.full_name,
           telefone: cleanTelefone,
+          receber_lembrete_agenda: formData.receber_lembrete_agenda,
           avatar_url: finalAvatarUrl,
           updated_at: new Date().toISOString()
         })
@@ -276,6 +279,45 @@ const ProfileScreen: React.FC = () => {
                   <p className="text-base text-slate-900 dark:text-white mt-1 font-medium capitalize">
                     {formatDate(profile?.created_at ?? user?.created_at)}
                   </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Notifications Settings */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Configurações de Notificações</h3>
+            </div>
+            <div className="p-6 space-y-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-start">
+                  <div className="mt-1 bg-amber-50 dark:bg-amber-900/20 p-2 rounded-lg text-amber-600 dark:text-amber-400 mr-4">
+                    <Bell className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-base font-medium text-slate-900 dark:text-white">Lembretes da Agenda</p>
+                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                      Receber notificações no WhatsApp 30 minutos antes do compromisso
+                    </p>
+                  </div>
+                </div>
+                <div>
+                  {isEditing ? (
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input 
+                        type="checkbox" 
+                        className="sr-only peer"
+                        checked={formData.receber_lembrete_agenda}
+                        onChange={(e) => setFormData(prev => ({ ...prev, receber_lembrete_agenda: e.target.checked }))}
+                      />
+                      <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-600 peer-checked:bg-blue-600"></div>
+                    </label>
+                  ) : (
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${profile?.receber_lembrete_agenda ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' : 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-400'}`}>
+                      {profile?.receber_lembrete_agenda ? 'Ativado' : 'Desativado'}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>

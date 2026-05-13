@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   UsersRound, Search, ChevronDown, Loader2, X, CheckCircle,
-  Mail, Phone, Calendar, Shield,
+  Mail, Phone, Calendar, Shield, Bell,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
@@ -18,6 +18,7 @@ interface UserProfile {
   role_id: string | null;
   created_at: string;
   roles: { id: string; name: string; slug: string } | null;
+  receber_lembrete_agenda?: boolean;
 }
 
 interface Role {
@@ -51,6 +52,7 @@ const UsersManagement: React.FC = () => {
   const [search, setSearch]     = useState('');
   const [selected, setSelected] = useState<UserProfile | null>(null);
   const [newRoleId, setNewRoleId] = useState('');
+  const [newReceberLembrete, setNewReceberLembrete] = useState(false);
   const [saving, setSaving]     = useState(false);
   const [successId, setSuccessId] = useState<string | null>(null);
 
@@ -82,6 +84,7 @@ const UsersManagement: React.FC = () => {
   const openUser = (u: UserProfile) => {
     setSelected(u);
     setNewRoleId(u.role_id ?? '');
+    setNewReceberLembrete(u.receber_lembrete_agenda ?? false);
   };
 
   const handleSaveRole = async () => {
@@ -91,12 +94,13 @@ const UsersManagement: React.FC = () => {
     await supabase.from('profiles').update({
       role_id: newRoleId || null,
       role: role?.slug === 'admin' ? 'admin' : 'colaborador',
+      receber_lembrete_agenda: newReceberLembrete,
       updated_at: new Date().toISOString(),
     }).eq('id', selected.id);
 
     setUsers(prev => prev.map(u =>
       u.id === selected.id
-        ? { ...u, role_id: newRoleId, role: role?.slug === 'admin' ? 'admin' : 'colaborador', roles: role ?? null }
+        ? { ...u, role_id: newRoleId, role: role?.slug === 'admin' ? 'admin' : 'colaborador', roles: role ?? null, receber_lembrete_agenda: newReceberLembrete }
         : u
     ));
     setSaving(false);
@@ -180,12 +184,17 @@ const UsersManagement: React.FC = () => {
                         className="h-9 w-9 rounded-full bg-slate-100 dark:bg-slate-700 object-cover shrink-0"
                       />
                       <div>
-                        <p className="text-sm font-medium text-slate-900 dark:text-white">
-                          {u.full_name ?? 'Sem nome'}
-                          {u.id === me?.id && (
-                            <span className="ml-2 text-xs text-blue-500">(você)</span>
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium text-slate-900 dark:text-white">
+                            {u.full_name ?? 'Sem nome'}
+                          </p>
+                          {u.receber_lembrete_agenda && (
+                            <Bell className="h-3.5 w-3.5 text-amber-500 shrink-0" title="Recebe lembretes da agenda" />
                           )}
-                        </p>
+                          {u.id === me?.id && (
+                            <span className="text-xs text-blue-500 shrink-0">(você)</span>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </td>
@@ -293,6 +302,28 @@ const UsersManagement: React.FC = () => {
                       <option key={r.id} value={r.id}>{r.name}</option>
                     ))}
                   </select>
+                </div>
+
+                <div className="pt-2">
+                  <label className="flex items-center justify-between p-3 border border-slate-200 dark:border-slate-700 rounded-lg cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                    <div>
+                      <span className="block text-sm font-semibold text-slate-700 dark:text-slate-300">
+                        Lembretes da Agenda
+                      </span>
+                      <span className="block text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                        Receber notificações no WhatsApp
+                      </span>
+                    </div>
+                    <div className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${newReceberLembrete ? 'bg-blue-600' : 'bg-slate-300 dark:bg-slate-600'}`}>
+                      <input
+                        type="checkbox"
+                        className="sr-only"
+                        checked={newReceberLembrete}
+                        onChange={(e) => setNewReceberLembrete(e.target.checked)}
+                      />
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${newReceberLembrete ? 'translate-x-6' : 'translate-x-1'}`} />
+                    </div>
+                  </label>
                 </div>
 
                 <div className="flex gap-3 pt-2">
