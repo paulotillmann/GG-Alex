@@ -18,7 +18,7 @@ import RequerimentoForm, {
 import {
   fetchAllBubbleRequerimentos, mapBubbleRequerimento, downloadAndUploadPdf, SyncResult,
 } from '../services/bubbleApi';
-import { fetchAllSaplRequerimentos, mapSaplToRequerimento } from '../services/saplApi';
+import { fetchAllSaplRequerimentos, mapSaplToRequerimento, fetchSaplDocumentosAcessorios } from '../services/saplApi';
 
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -68,7 +68,8 @@ const RequerimentosScreen: React.FC = () => {
   const [viewTituloItem, setViewTituloItem]   = useState<Requerimento | null>(null);
 
   // Mapa de contagem de arquivos por requerimento_id
-  const [arquivosCount, setArquivosCount] = useState<Record<string, number>>({});
+  const [arquivosCount, setArquivosCount] = useState<Record<string, { anexos: number; oficios: number }>>({});
+  const [viewArquivosFilter, setViewArquivosFilter] = useState<'all' | 'anexos' | 'oficios'>('all');
 
   // ── Bubble Sync State ─────────────────────────────────────────────────────
   const [showSyncModal, setShowSyncModal] = useState(false);
@@ -82,7 +83,7 @@ const RequerimentosScreen: React.FC = () => {
   const [showSaplModal, setShowSaplModal] = useState(false);
   const [saplLoading, setSaplLoading] = useState(false);
   const [saplProgress, setSaplProgress] = useState<{ fetched: number; total: number; current: number }>({ fetched: 0, total: 0, current: 0 });
-  const [saplResult, setSaplResult] = useState<{ total: number; inserted: number; updated: number; errors: number; } | null>(null);
+  const [saplResult, setSaplResult] = useState<{ total: number; inserted: number; updated: number; errors: number; oficios: number; } | null>(null);
   const [saplError, setSaplError] = useState<string | null>(null);
   const [saplPhase, setSaplPhase] = useState<'idle' | 'fetching' | 'syncing' | 'done'>('idle');
 
@@ -96,7 +97,7 @@ const RequerimentosScreen: React.FC = () => {
 
   // Listagem
   const [currentPage, setCurrentPage] = useState(1);
-  const ITEMS_PER_PAGE = 8;
+  const ITEMS_PER_PAGE = 12;
   const [sortConfig, setSortConfig] = useState<{ key: keyof Requerimento; direction: 'asc'|'desc' }>({
     key: 'data_sessao', direction: 'desc',
   });
@@ -106,13 +107,19 @@ const RequerimentosScreen: React.FC = () => {
     setLoading(true);
     const [{ data }, { data: counts }] = await Promise.all([
       supabase.from('requerimento').select('*, pessoa(full_name)').order('data_sessao', { ascending: false }),
-      supabase.from('requerimento_arquivos').select('requerimento_id'),
+      supabase.from('requerimento_arquivos').select('requerimento_id, nome_arquivo'),
     ]);
     setItems((data ?? []) as Requerimento[]);
     // montar mapa de contagem
-    const cmap: Record<string, number> = {};
+    const cmap: Record<string, { anexos: number; oficios: number }> = {};
     for (const row of (counts ?? [])) {
-      cmap[row.requerimento_id] = (cmap[row.requerimento_id] ?? 0) + 1;
+      const nomeLower = (row.nome_arquivo || '').toLowerCase();
+      const isOficio = nomeLower.includes('ofício') || nomeLower.includes('oficio') || nomeLower.includes('prefeito') || nomeLower.includes('resposta');
+      
+      if (!cmap[row.requerimento_id]) cmap[row.requerimento_id] = { anexos: 0, oficios: 0 };
+      
+      if (isOficio) cmap[row.requerimento_id].oficios += 1;
+      else cmap[row.requerimento_id].anexos += 1;
     }
     setArquivosCount(cmap);
     setLoading(false);
@@ -243,15 +250,26 @@ const RequerimentosScreen: React.FC = () => {
     setUploadProgress('');
   };
 
-  const openViewArquivos = async (item: Requerimento) => {
+  const openViewArquivos = async (item: Requerimento, filter: 'all' | 'anexos' | 'oficios' = 'all') => {
     setViewArquivosItem(item);
+    setViewArquivosFilter(filter);
     setLoadingArquivos(true);
     const { data } = await supabase
       .from('requerimento_arquivos')
       .select('*')
       .eq('requerimento_id', item.id)
       .order('created_at', { ascending: false });
-    setViewArquivos((data ?? []) as ArquivoReq[]);
+      
+    let filteredData = (data ?? []) as ArquivoReq[];
+    if (filter !== 'all') {
+      filteredData = filteredData.filter(a => {
+        const nomeLower = (a.nome_arquivo || '').toLowerCase();
+        const isOficio = nomeLower.includes('ofício') || nomeLower.includes('oficio') || nomeLower.includes('prefeito') || nomeLower.includes('resposta');
+        return filter === 'oficios' ? isOficio : !isOficio;
+      });
+    }
+    
+    setViewArquivos(filteredData);
     setLoadingArquivos(false);
   };
 
@@ -266,13 +284,7 @@ const RequerimentosScreen: React.FC = () => {
     setDeletingArquivoId(null);
     // atualizar a lista no modal
     setViewArquivos(prev => prev.filter(a => a.id !== arquivoId));
-    // atualizar contador no grid
-    if (viewArquivosItem) {
-      setArquivosCount(prev => ({
-        ...prev,
-        [viewArquivosItem.id]: Math.max(0, (prev[viewArquivosItem.id] ?? 1) - 1),
-      }));
-    }
+    fetchData(); // recarrega a contagem geral
   };
 
   const handleUploadPDF = async () => {
@@ -312,8 +324,7 @@ const RequerimentosScreen: React.FC = () => {
     }
     // atualizar contagem
     if (inserted.length > 0) {
-      const reqId = uploadItem.id;
-      setArquivosCount(prev => ({ ...prev, [reqId]: (prev[reqId] ?? 0) + inserted.length }));
+      fetchData();
       showSuccess(`${inserted.length} arquivo(s) importado(s) com sucesso!`);
     }
   };
@@ -453,7 +464,7 @@ const RequerimentosScreen: React.FC = () => {
 
       setSaplPhase('syncing');
 
-      const result = { total: saplRecords.length, inserted: 0, updated: 0, errors: 0 };
+      const result = { total: saplRecords.length, inserted: 0, updated: 0, errors: 0, oficios: 0 };
 
       // Buscar requerimentos existentes para comparação
       const { data: existing } = await supabase.from('requerimento').select('id, numero_requerimento');
@@ -524,6 +535,57 @@ const RequerimentosScreen: React.FC = () => {
               arquivo_url: arquivoUrl,
               tamanho_bytes: null,
             });
+          }
+        }
+
+        // Documentos Acessórios
+        if (requerimentoId) {
+          const docsAcessorios = await fetchSaplDocumentosAcessorios(sapl.id);
+          
+          let hasOficioExecutivo = false;
+
+          for (const doc of docsAcessorios) {
+            if (!doc.arquivo) continue;
+            
+            let docUrl = doc.arquivo;
+            if (!docUrl.startsWith('http')) {
+              docUrl = `https://sapl.araguari.mg.leg.br${docUrl}`;
+            }
+
+            // Verifica se é um ofício de resposta do executivo
+            const nomeLower = (doc.nome || '').toLowerCase();
+            if (nomeLower.includes('ofício executivo') || nomeLower.includes('prefeito') || nomeLower.includes('resposta')) {
+              hasOficioExecutivo = true;
+            }
+
+            // Verifica duplicação
+            const { data: arqsDoc } = await supabase
+              .from('requerimento_arquivos')
+              .select('id')
+              .eq('requerimento_id', requerimentoId)
+              .eq('arquivo_url', docUrl);
+
+            if (!arqsDoc || arqsDoc.length === 0) {
+              const nome_arquivo = doc.nome || docUrl.split('/').pop() || `anexo_${doc.id}.pdf`;
+              await supabase.from('requerimento_arquivos').insert({
+                requerimento_id: requerimentoId,
+                nome_arquivo: nome_arquivo,
+                arquivo_url: docUrl,
+                tamanho_bytes: null,
+              });
+              result.oficios++;
+            }
+          }
+
+          // Atualiza status se houver resposta oficial
+          if (hasOficioExecutivo) {
+            await supabase
+              .from('requerimento')
+              .update({
+                status: 'Respondido',
+                resposta_recebida: 'Sim'
+              })
+              .eq('id', requerimentoId);
           }
         }
       }
@@ -823,7 +885,10 @@ const RequerimentosScreen: React.FC = () => {
                     </th>
                   ))}
                   <th className="px-4 py-3 text-center text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide w-16">
-                    Anexo
+                    Anexos
+                  </th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide w-16">
+                    Ofícios
                   </th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">
                     Ações
@@ -889,16 +954,31 @@ const RequerimentosScreen: React.FC = () => {
                     <td className="px-4 py-3 whitespace-nowrap text-sm text-slate-700 dark:text-slate-300">
                       {fmtDate(item.created_at?.split('T')[0])}
                     </td>
-                    {/* Coluna Anexo PDF */}
+                    {/* Coluna Anexos */}
                     <td className="px-4 py-3 text-center">
-                      {(arquivosCount[item.id] ?? 0) > 0 ? (
+                      {(arquivosCount[item.id]?.anexos ?? 0) > 0 ? (
                         <button
-                          onClick={() => openViewArquivos(item)}
-                          title={`${arquivosCount[item.id]} arquivo(s) anexado(s)`}
+                          onClick={() => openViewArquivos(item, 'anexos')}
+                          title={`${arquivosCount[item.id].anexos} anexo(s)`}
                           className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors"
                         >
                           <Paperclip className="h-4 w-4" />
-                          <span className="text-xs font-bold">{arquivosCount[item.id]}</span>
+                          <span className="text-xs font-bold">{arquivosCount[item.id].anexos}</span>
+                        </button>
+                      ) : (
+                        <span className="text-slate-300 dark:text-slate-700 text-xs select-none">—</span>
+                      )}
+                    </td>
+                    {/* Coluna Ofícios */}
+                    <td className="px-4 py-3 text-center">
+                      {(arquivosCount[item.id]?.oficios ?? 0) > 0 ? (
+                        <button
+                          onClick={() => openViewArquivos(item, 'oficios')}
+                          title={`${arquivosCount[item.id].oficios} ofício(s)`}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"
+                        >
+                          <FileText className="h-4 w-4" />
+                          <span className="text-xs font-bold">{arquivosCount[item.id].oficios}</span>
                         </button>
                       ) : (
                         <span className="text-slate-300 dark:text-slate-700 text-xs select-none">—</span>
@@ -1464,8 +1544,12 @@ const RequerimentosScreen: React.FC = () => {
                       <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{saplResult.updated}</p>
                       <p className="text-xs text-blue-600 dark:text-blue-400 mt-0.5">Atualizados</p>
                     </div>
+                    <div className="text-center p-3 rounded-xl bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800">
+                      <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">{saplResult.oficios}</p>
+                      <p className="text-xs text-purple-600 dark:text-purple-400 mt-0.5">Ofícios Importados</p>
+                    </div>
                     {saplResult.errors > 0 && (
-                      <div className="text-center p-3 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+                      <div className="text-center p-3 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 col-span-2">
                         <p className="text-2xl font-bold text-red-600 dark:text-red-400">{saplResult.errors}</p>
                         <p className="text-xs text-red-600 dark:text-red-400 mt-0.5">Com Erro</p>
                       </div>

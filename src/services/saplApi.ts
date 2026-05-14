@@ -102,3 +102,36 @@ export function mapSaplToRequerimento(sapl: SaplMateria, userId: string) {
     user_id: userId,
   };
 }
+
+export interface SaplDocumentoAcessorio {
+  id: number;
+  nome: string;
+  data: string;
+  arquivo: string;
+  materia: number;
+  tipo: number;
+}
+
+/**
+ * Busca os documentos acessórios de uma matéria específica.
+ */
+export async function fetchSaplDocumentosAcessorios(materiaId: number): Promise<SaplDocumentoAcessorio[]> {
+  const headers = new Headers();
+  headers.set('Authorization', 'Basic ' + btoa(`${USERNAME}:${PASSWORD}`));
+  headers.set('Accept', 'application/json');
+
+  try {
+    const url = `${SAPL_BASE_URL}/api/materia/documentoacessorio/?materia=${materiaId}&page_size=100`;
+    const response = await fetch(url, { headers });
+    if (!response.ok) {
+      console.warn(`[SAPL] Erro ao buscar documentos da matéria ${materiaId}: ${response.statusText}`);
+      return [];
+    }
+    const data = await response.json();
+    return data.results || [];
+  } catch (err) {
+    console.error(`Erro na busca de docs da matéria ${materiaId}:`, err);
+    return [];
+  }
+}
+
