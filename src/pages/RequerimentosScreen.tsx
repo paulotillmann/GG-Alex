@@ -4,7 +4,7 @@ import {
   FileText, Plus, Loader2, CheckCircle,
   Pencil, Trash2, ChevronUp, ChevronDown, ChevronsUpDown,
   CheckCircle2, XCircle, FilePlus2, Clock3, AlertCircle,
-  Search, Filter, X, RefreshCw, Printer, Upload, Paperclip, ExternalLink, CloudDownload
+  Search, Filter, X, RefreshCw, Printer, Upload, Paperclip, ExternalLink, CloudDownload, DatabaseBackup, Clock
 } from 'lucide-react';
 
 
@@ -19,7 +19,7 @@ import {
   fetchAllBubbleRequerimentos, mapBubbleRequerimento, downloadAndUploadPdf, SyncResult,
 } from '../services/bubbleApi';
 import { fetchAllSaplRequerimentos, mapSaplToRequerimento, fetchSaplDocumentosAcessorios } from '../services/saplApi';
-
+import SaplHistoryModal from '../components/SaplHistoryModal';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const fmtDate = (d?: string | null) => {
@@ -86,7 +86,8 @@ const RequerimentosScreen: React.FC = () => {
   const [saplResult, setSaplResult] = useState<{ total: number; inserted: number; updated: number; errors: number; oficios: number; } | null>(null);
   const [saplError, setSaplError] = useState<string | null>(null);
   const [saplPhase, setSaplPhase] = useState<'idle' | 'fetching' | 'syncing' | 'done'>('idle');
-
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [historyModalReqId, setHistoryModalReqId] = useState<string | null>(null);
 
   // Filtros
   const [search, setSearch]         = useState('');
@@ -467,42 +468,91 @@ const RequerimentosScreen: React.FC = () => {
       const result = { total: saplRecords.length, inserted: 0, updated: 0, errors: 0, oficios: 0 };
 
       // Buscar requerimentos existentes para comparação
-      const { data: existing } = await supabase.from('requerimento').select('id, numero_requerimento');
-      const existingMap = new Map((existing ?? []).map((r: any) => [r.numero_requerimento, r.id]));
+      const { data: existing } = await supabase.from('requerimento').select('*');
+      const existingMap = new Map((existing ?? []).map((r: any) => [r.numero_requerimento, r]));
+
+      const historicoLogs: any[] = [];
 
       for (let i = 0; i < saplRecords.length; i++) {
         const sapl = saplRecords[i];
         setSaplProgress(p => ({ ...p, current: i + 1 }));
 
         const mapped = mapSaplToRequerimento(sapl, userId);
-        const existingId = existingMap.get(mapped.numero_requerimento);
-        let requerimentoId = existingId;
+        const existingRecord = existingMap.get(mapped.numero_requerimento);
+        let requerimentoId = existingRecord?.id;
+        
+        let hasOficioExecutivo = false;
+        let novoStatus = mapped.status;
+        let novaResposta = mapped.resposta_recebida;
 
-        if (existingId) {
+        // Pré-fetch Documentos Acessórios e PDFs para ver se vamos mudar o status antes do UPSERT
+        const docsAcessorios = await fetchSaplDocumentosAcessorios(sapl.id);
+        const novosArquivos: any[] = [];
+
+        if (sapl.texto_original) {
+          let arquivoUrl = sapl.texto_original;
+          if (!arquivoUrl.startsWith('http')) arquivoUrl = `https://sapl.araguari.mg.leg.br${arquivoUrl}`;
+          novosArquivos.push({ nome: arquivoUrl.split('/').pop() || `sapl_${sapl.id}.pdf`, url: arquivoUrl, fromDocs: false });
+        }
+
+        for (const doc of docsAcessorios) {
+          if (!doc.arquivo) continue;
+          let docUrl = doc.arquivo;
+          if (!docUrl.startsWith('http')) docUrl = `https://sapl.araguari.mg.leg.br${docUrl}`;
+          novosArquivos.push({ nome: doc.nome || docUrl.split('/').pop() || `anexo_${doc.id}.pdf`, url: docUrl, fromDocs: true });
+          
+          const nomeLower = (doc.nome || '').toLowerCase();
+          if (nomeLower.includes('ofício executivo') || nomeLower.includes('prefeito') || nomeLower.includes('resposta')) {
+            hasOficioExecutivo = true;
+          }
+        }
+
+        if (hasOficioExecutivo) {
+          novoStatus = 'Respondido';
+          novaResposta = 'Sim';
+        }
+
+        if (existingRecord) {
           // UPDATE
-          const { error: updErr } = await supabase
-            .from('requerimento')
-            .update({
-              titulo: mapped.titulo,
-              data_sessao: mapped.data_sessao,
-              status: mapped.status,
-              informacoes_adicionais: mapped.informacoes_adicionais
-            })
-            .eq('id', existingId);
-            
-          if (updErr) {
-            console.error('[SAPL Sync] Erro ao atualizar:', updErr);
-            result.errors++;
-          } else {
-            result.updated++;
+          const updatePayload: any = {
+            titulo: mapped.titulo,
+            data_sessao: mapped.data_sessao,
+            status: novoStatus,
+            resposta_recebida: novaResposta,
+            informacoes_adicionais: mapped.informacoes_adicionais
+          };
+
+          // Calculando Diff
+          const diff: any = {};
+          let changed = false;
+          Object.keys(updatePayload).forEach(key => {
+            if (String(existingRecord[key] || '') !== String(updatePayload[key] || '')) {
+              diff[key] = { antigo: existingRecord[key], novo: updatePayload[key] };
+              changed = true;
+            }
+          });
+
+          if (changed) {
+            const { error: updErr } = await supabase.from('requerimento').update(updatePayload).eq('id', existingRecord.id);
+            if (updErr) {
+              console.error('[SAPL Sync] Erro ao atualizar:', updErr);
+              result.errors++;
+            } else {
+              result.updated++;
+              historicoLogs.push({
+                requerimento_id: existingRecord.id,
+                entidade_tipo: 'Requerimento',
+                entidade_identificador: mapped.numero_requerimento,
+                acao: 'ATUALIZADO',
+                detalhes_alteracao: diff,
+                user_id: userId
+              });
+            }
           }
         } else {
           // INSERT
-          const { data: inserted, error: insErr } = await supabase
-            .from('requerimento')
-            .insert(mapped)
-            .select('id')
-            .single();
+          const insertPayload = { ...mapped, status: novoStatus, resposta_recebida: novaResposta };
+          const { data: inserted, error: insErr } = await supabase.from('requerimento').insert(insertPayload).select('id').single();
 
           if (insErr || !inserted) {
             console.error('[SAPL Sync] Erro ao inserir:', insErr);
@@ -510,84 +560,49 @@ const RequerimentosScreen: React.FC = () => {
           } else {
             requerimentoId = inserted.id;
             result.inserted++;
-          }
-        }
-
-        // PDFs (URL Direta do SAPL)
-        if (requerimentoId && sapl.texto_original) {
-          let arquivoUrl = sapl.texto_original;
-          if (!arquivoUrl.startsWith('http')) {
-            arquivoUrl = `https://sapl.araguari.mg.leg.br${arquivoUrl}`;
-          }
-
-          // Verifica se o arquivo já existe para não duplicar
-          const { data: arqs } = await supabase
-            .from('requerimento_arquivos')
-            .select('id')
-            .eq('requerimento_id', requerimentoId)
-            .eq('arquivo_url', arquivoUrl);
-
-          if (!arqs || arqs.length === 0) {
-            const nome_arquivo = arquivoUrl.split('/').pop() || `sapl_${sapl.id}.pdf`;
-            await supabase.from('requerimento_arquivos').insert({
+            historicoLogs.push({
               requerimento_id: requerimentoId,
-              nome_arquivo: nome_arquivo,
-              arquivo_url: arquivoUrl,
-              tamanho_bytes: null,
+              entidade_tipo: 'Requerimento',
+              entidade_identificador: mapped.numero_requerimento,
+              acao: 'CRIADO',
+              detalhes_alteracao: { novo_registro: insertPayload.titulo },
+              user_id: userId
             });
           }
         }
 
-        // Documentos Acessórios
-        if (requerimentoId) {
-          const docsAcessorios = await fetchSaplDocumentosAcessorios(sapl.id);
-          
-          let hasOficioExecutivo = false;
+        // Verifica e insere os Arquivos e Ofícios se o requerimento existe
+        if (requerimentoId && novosArquivos.length > 0) {
+          // Busca os que já existem para não duplicar
+          const { data: arqs } = await supabase.from('requerimento_arquivos').select('arquivo_url').eq('requerimento_id', requerimentoId);
+          const urlsExistentes = new Set((arqs || []).map(a => a.arquivo_url));
 
-          for (const doc of docsAcessorios) {
-            if (!doc.arquivo) continue;
-            
-            let docUrl = doc.arquivo;
-            if (!docUrl.startsWith('http')) {
-              docUrl = `https://sapl.araguari.mg.leg.br${docUrl}`;
-            }
-
-            // Verifica se é um ofício de resposta do executivo
-            const nomeLower = (doc.nome || '').toLowerCase();
-            if (nomeLower.includes('ofício executivo') || nomeLower.includes('prefeito') || nomeLower.includes('resposta')) {
-              hasOficioExecutivo = true;
-            }
-
-            // Verifica duplicação
-            const { data: arqsDoc } = await supabase
-              .from('requerimento_arquivos')
-              .select('id')
-              .eq('requerimento_id', requerimentoId)
-              .eq('arquivo_url', docUrl);
-
-            if (!arqsDoc || arqsDoc.length === 0) {
-              const nome_arquivo = doc.nome || docUrl.split('/').pop() || `anexo_${doc.id}.pdf`;
+          for (const novoArq of novosArquivos) {
+            if (!urlsExistentes.has(novoArq.url)) {
               await supabase.from('requerimento_arquivos').insert({
                 requerimento_id: requerimentoId,
-                nome_arquivo: nome_arquivo,
-                arquivo_url: docUrl,
+                nome_arquivo: novoArq.nome,
+                arquivo_url: novoArq.url,
                 tamanho_bytes: null,
               });
-              result.oficios++;
+              if (novoArq.fromDocs) result.oficios++;
+              
+              historicoLogs.push({
+                requerimento_id: requerimentoId,
+                entidade_tipo: 'Arquivo/Ofício',
+                entidade_identificador: novoArq.nome,
+                acao: 'CRIADO',
+                detalhes_alteracao: { arquivo: novoArq.nome },
+                user_id: userId
+              });
             }
           }
-
-          // Atualiza status se houver resposta oficial
-          if (hasOficioExecutivo) {
-            await supabase
-              .from('requerimento')
-              .update({
-                status: 'Respondido',
-                resposta_recebida: 'Sim'
-              })
-              .eq('id', requerimentoId);
-          }
         }
+      }
+
+      // Gravar Históricos
+      if (historicoLogs.length > 0) {
+        await supabase.from('sapl_sincronismo_historico').insert(historicoLogs);
       }
 
       setSaplPhase('done');
@@ -683,6 +698,14 @@ const RequerimentosScreen: React.FC = () => {
           >
             <RefreshCw className={`h-4 w-4 sm:mr-2 ${loading ? 'animate-spin text-blue-500' : ''}`} /> 
             <span className="hidden sm:inline">Atualizar</span>
+          </button>
+
+          <button
+            onClick={() => { setHistoryModalReqId(null); setShowHistoryModal(true); }}
+            className="flex items-center px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
+          >
+            <DatabaseBackup className="h-4 w-4 sm:mr-2" /> 
+            <span className="hidden sm:inline">Histórico SAPL</span>
           </button>
 
           <button
@@ -986,6 +1009,13 @@ const RequerimentosScreen: React.FC = () => {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => { setHistoryModalReqId(item.id); setShowHistoryModal(true); }}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors"
+                          title="Histórico de Sincronismo"
+                        >
+                          <Clock className="h-4 w-4" />
+                        </button>
                         {/* Importar PDF(s) */}
                         <button
                           onClick={() => openUpload(item)}
@@ -1568,6 +1598,12 @@ const RequerimentosScreen: React.FC = () => {
         )}
       </AnimatePresence>
 
+      {/* Modal: Histórico */}
+      <SaplHistoryModal
+        isOpen={showHistoryModal}
+        onClose={() => setShowHistoryModal(false)}
+        requerimentoId={historyModalReqId}
+      />
     </div>
   );
 };
