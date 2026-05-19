@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, Plus, Loader2, CheckCircle, MapPin,
   Pencil, Trash2, ChevronUp, ChevronDown, ChevronsUpDown,
-  Users, ShieldCheck, Building2, Briefcase, Tag, FileText, Printer
+  Users, ShieldCheck, Building2, Briefcase, Tag, FileText, Printer, Gift, Send, Phone, AlertCircle
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { maskPhone, maskCPF, maskCNPJ } from '../utils/validators';
@@ -51,6 +51,13 @@ const PeopleScreen: React.FC = () => {
     orientation: 'portrait' as 'portrait' | 'landscape',
   });
 
+  // Birthday state
+  const [birthdayList, setBirthdayList] = useState<any[]>([]);
+  const [showBirthdayModal, setShowBirthdayModal] = useState(false);
+  const [sendingBirthdays, setSendingBirthdays] = useState(false);
+  const [birthdayStatus, setBirthdayStatus] = useState<Record<string, { status: 'success' | 'error' | 'pending', error?: string }>>({});
+  const [cronActive, setCronActive] = useState<boolean>(false);
+
   // ─── Auto-open form check (Vindo do Dashboard) ──────────────────────────────
   useEffect(() => {
     const autoAction = sessionStorage.getItem('autoOpenForm_pessoas');
@@ -76,10 +83,23 @@ const PeopleScreen: React.FC = () => {
     setLoading(true);
     const { data } = await supabase.from('pessoa').select('*').order('created_at', { ascending: false });
     setPeople((data ?? []) as Pessoa[]);
+    
+    // Buscar aniversariantes de hoje
+    const { data: bData } = await supabase.rpc('get_aniversariantes_hoje');
+    setBirthdayList(bData || []);
+    
     setLoading(false);
   }, []);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  const fetchCronStatus = async () => {
+    const { data } = await supabase.rpc('get_birthday_cron_status');
+    setCronActive(!!data);
+  };
+
+  useEffect(() => { 
+    fetchData(); 
+    fetchCronStatus();
+  }, [fetchData]);
 
   // ── Realtime subscription ──────────────────────────────────────────────
   useEffect(() => {
@@ -159,6 +179,52 @@ const PeopleScreen: React.FC = () => {
   const openEdit = (p: Pessoa) => {
     setEditingPerson(p);
     setShowForm(true);
+  };
+
+  const handleOpenBirthdayModal = () => {
+    setShowBirthdayModal(true);
+  };
+
+  const toggleCronStatus = async () => {
+    const newStatus = !cronActive;
+    setCronActive(newStatus); // optimistic UI
+    const { error } = await supabase.rpc('toggle_birthday_cron', { enable: newStatus });
+    if (error) {
+      setCronActive(!newStatus); // revert se der erro
+      alert("Erro ao alterar o agendamento: " + error.message);
+    }
+  };
+
+  const sendBirthdayNotification = async (targetId?: string) => {
+    setSendingBirthdays(true);
+    
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Não autenticado");
+
+      const response = await supabase.functions.invoke('send-birthday-wpp', {
+        body: { targetId }
+      });
+      
+      if (response.error) throw response.error;
+      
+      const results = response.data?.result?.results || [];
+      
+      setBirthdayStatus(prev => {
+        const next = { ...prev };
+        results.forEach((r: any) => {
+          next[r.id] = { status: r.status, error: r.error };
+        });
+        return next;
+      });
+      
+      showSuccess(`Mensagens enviadas com sucesso!`);
+    } catch (err: any) {
+      console.error(err);
+      alert("Erro ao disparar WhatsApp: " + err.message);
+    } finally {
+      setSendingBirthdays(false);
+    }
   };
 
   const showSuccess = (msg: string) => {
@@ -1112,11 +1178,14 @@ const PeopleScreen: React.FC = () => {
           { label: 'Pessoas', type: 'Pessoa', value: stats.pessoa, color: 'text-blue-600 dark:text-blue-400', icon: Users },
           { label: 'Autoridades', type: 'Autoridade', value: stats.autoridade, color: 'text-purple-600 dark:text-purple-400', icon: ShieldCheck },
           { label: 'Entidades', type: 'Entidade', value: stats.entidade, color: 'text-emerald-600 dark:text-emerald-400', icon: Building2 },
-          { label: 'Empresas', type: 'Empresa', value: stats.empresa, color: 'text-amber-600 dark:text-amber-400', icon: Briefcase },
+          { label: 'Aniversariantes Hoje', type: 'Aniversariantes', action: handleOpenBirthdayModal, value: birthdayList.length, color: 'text-orange-500 dark:text-orange-400', icon: Gift },
         ].map((stat, i) => (
           <div 
             key={i} 
-            onClick={() => setFilterType(filterType === stat.type ? '' : stat.type)}
+            onClick={() => {
+              if (stat.action) stat.action();
+              else setFilterType(filterType === stat.type ? '' : stat.type);
+            }}
             className={`bg-white dark:bg-[#1C2434] rounded-2xl p-5 border shadow-sm flex flex-col justify-between transition-colors relative overflow-hidden group cursor-pointer
               ${filterType === stat.type ? 'border-blue-500 dark:border-blue-500 ring-1 ring-blue-500' : 'border-slate-200 dark:border-slate-800 hover:border-blue-500/50'}
             `}
@@ -1501,6 +1570,114 @@ const PeopleScreen: React.FC = () => {
         )}
       </AnimatePresence>
 
+      {/* Modal de Aniversariantes */}
+      <AnimatePresence>
+        {showBirthdayModal && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-2xl shadow-2xl p-6 max-h-[90vh] flex flex-col"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-full bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center text-orange-600 dark:text-orange-400">
+                    <Gift className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Aniversariantes do Dia</h3>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">{birthdayList.length} registros hoje</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4">
+                  {/* Toggle para o Cron Automático */}
+                  <label className="flex items-center cursor-pointer gap-2 mr-2" title="Ativa ou Desativa o agendamento de 09:00 BRT no banco de dados">
+                    <div className="relative">
+                      <input type="checkbox" className="sr-only" checked={cronActive} onChange={toggleCronStatus} />
+                      <div className={`block w-10 h-6 rounded-full transition-colors ${cronActive ? 'bg-green-500' : 'bg-slate-300 dark:bg-slate-600'}`}></div>
+                      <div className={`dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${cronActive ? 'transform translate-x-4' : ''}`}></div>
+                    </div>
+                    <span className="text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">
+                      Envio automático as 09h.
+                    </span>
+                  </label>
+
+                  <button onClick={() => setShowBirthdayModal(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+                    <Plus className="h-6 w-6 rotate-45" />
+                  </button>
+                </div>
+              </div>
+              
+              <div className="flex-1 overflow-y-auto mb-4 border border-slate-200 dark:border-slate-800 rounded-lg">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-slate-50 dark:bg-slate-800/50">
+                    <tr>
+                      <th className="py-3 px-4 font-semibold text-slate-600 dark:text-slate-300">Nome</th>
+                      <th className="py-3 px-4 font-semibold text-slate-600 dark:text-slate-300">Tipo</th>
+                      <th className="py-3 px-4 font-semibold text-slate-600 dark:text-slate-300">WhatsApp</th>
+                      <th className="py-3 px-4 font-semibold text-slate-600 dark:text-slate-300">Status</th>
+                      <th className="py-3 px-4 font-semibold text-slate-600 dark:text-slate-300 text-right">Ação</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {birthdayList.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-8 text-center text-slate-500">Nenhum aniversariante hoje.</td>
+                      </tr>
+                    ) : (
+                      birthdayList.map((person) => {
+                        const status = birthdayStatus[person.id];
+                        return (
+                          <tr key={person.id} className="border-t border-slate-100 dark:border-slate-800">
+                            <td className="py-3 px-4 font-medium text-slate-800 dark:text-slate-200">{person.full_name}</td>
+                            <td className="py-3 px-4 text-slate-600 dark:text-slate-400">
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                                {person.tipo}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-slate-600 dark:text-slate-400">{person.phone ? maskPhone(person.phone) : 'Sem número'}</td>
+                            <td className="py-3 px-4">
+                              {status?.status === 'success' ? (
+                                <span className="flex items-center text-xs text-green-600 dark:text-green-400"><CheckCircle className="h-3 w-3 mr-1"/> Enviado</span>
+                              ) : status?.status === 'error' ? (
+                                <span className="flex items-center text-xs text-red-600 dark:text-red-400" title={status.error}><AlertCircle className="h-3 w-3 mr-1"/> Falhou</span>
+                              ) : (
+                                <span className="text-xs text-slate-400">Pendente</span>
+                              )}
+                            </td>
+                            <td className="py-3 px-4 text-right">
+                              <button 
+                                onClick={() => sendBirthdayNotification(person.id)}
+                                disabled={sendingBirthdays || !person.phone}
+                                className="inline-flex items-center px-2.5 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-900/20 dark:text-blue-400 dark:hover:bg-blue-800/40 rounded text-xs font-medium disabled:opacity-50"
+                              >
+                                <Send className="h-3 w-3 mr-1" /> Enviar
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="flex justify-between items-center pt-4 border-t border-slate-100 dark:border-slate-800">
+                <span className="text-xs text-slate-500">A automação diária disparará todas as mensagens para os pendentes no horário estipulado.</span>
+                <button 
+                  onClick={() => sendBirthdayNotification()} 
+                  disabled={sendingBirthdays || birthdayList.length === 0}
+                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2 disabled:opacity-50"
+                >
+                  {sendingBirthdays ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                  Notificar Todos Agora
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
     </div>
   );

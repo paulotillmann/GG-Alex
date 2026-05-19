@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Users, CalendarDays, StickyNote, TrendingUp, Calendar, ChevronRight, Loader2, PlusCircle, FileText, ChevronLeft, Clock, MapPin, Bell, MessageSquare } from 'lucide-react';
+import { Users, CalendarDays, StickyNote, TrendingUp, Calendar, ChevronRight, Loader2, PlusCircle, FileText, ChevronLeft, Clock, MapPin, Bell, MessageSquare, CheckCircle2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -10,6 +10,7 @@ interface DashboardStats {
   thisMonth: number;
   messagesToday: number;
   reqCount: number;
+  demandasConcluidasMes: number;
 }
 
 interface MonthlyData {
@@ -56,7 +57,7 @@ const Dashboard: React.FC = () => {
   const canAgenda = hasModule('agenda');
 
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState<DashboardStats>({ total: 0, thisMonth: 0, messagesToday: 0, reqCount: 0 });
+  const [stats, setStats] = useState<DashboardStats>({ total: 0, thisMonth: 0, messagesToday: 0, reqCount: 0, demandasConcluidasMes: 0 });
   const [chartData, setChartData] = useState<MonthlyData[]>([]);
   const [weeklyData, setWeeklyData] = useState<MonthlyData[]>([]);
   const [chartView, setChartView] = useState<ChartView>('week');
@@ -86,6 +87,17 @@ const Dashboard: React.FC = () => {
           .select('*', { count: 'exact', head: true })
           .gte('created_at', startOfToday.toISOString());
         if (msgsError) throw msgsError;
+
+        // Demandas Concluídas no Mês
+        const startOfThisMonth = new Date();
+        startOfThisMonth.setDate(1);
+        startOfThisMonth.setHours(0, 0, 0, 0);
+        const { count: demandasCount, error: demandasError } = await supabase
+          .from('demandas')
+          .select('*', { count: 'exact', head: true })
+          .eq('status', 'CONCLUÍDA')
+          .gte('created_at', startOfThisMonth.toISOString());
+        if (demandasError) throw demandasError;
 
         // Agenda Items for the month view
         const firstDayOfMonth = new Date(calYear, calMonth, 1).toISOString();
@@ -151,7 +163,7 @@ const Dashboard: React.FC = () => {
           count: d.count
         }));
 
-        setStats({ total, thisMonth: monthCount, messagesToday: msgsToday || 0, reqCount: reqCount || 0 });
+        setStats({ total, thisMonth: monthCount, messagesToday: msgsToday || 0, reqCount: reqCount || 0, demandasConcluidasMes: demandasCount || 0 });
         setChartData(aggregatedChart);
         setWeeklyData(aggregatedWeekly);
         setAgendaItems((agendaData ?? []) as AgendaItem[]);
@@ -172,6 +184,9 @@ const Dashboard: React.FC = () => {
         fetchDashboardData();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'pessoa' }, () => {
+        fetchDashboardData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'demandas' }, () => {
         fetchDashboardData();
       })
       .subscribe();
@@ -266,13 +281,13 @@ const Dashboard: React.FC = () => {
           className="bg-white dark:bg-[#1C2434] rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden group hover:border-emerald-300 dark:hover:border-emerald-700 transition-colors"
         >
           <div className="absolute top-1/2 -translate-y-1/2 -right-4 opacity-5 dark:opacity-10 pointer-events-none group-hover:scale-110 transition-transform duration-300">
-            <Calendar size={80} />
+            <CheckCircle2 size={80} />
           </div>
-          <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-1 relative z-10">Pessoas neste Mês</p>
-          <h3 className="text-4xl font-heading font-bold text-slate-900 dark:text-white mb-2 relative z-10">{stats.thisMonth}</h3>
+          <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-1 relative z-10">Demandas Concluídas</p>
+          <h3 className="text-4xl font-heading font-bold text-slate-900 dark:text-white mb-2 relative z-10">{stats.demandasConcluidasMes}</h3>
           <div className="flex items-center text-[11px] xl:text-xs font-medium text-emerald-600 dark:text-emerald-400 relative z-10">
-            <Calendar className="h-3 w-3 mr-1.5" />
-            <span className="opacity-90">Novas inclusões no mês</span>
+            <CheckCircle2 className="h-3 w-3 mr-1.5" />
+            <span className="opacity-90">Demandas resolvidas no mês</span>
           </div>
         </motion.div>
 

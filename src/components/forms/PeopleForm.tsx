@@ -29,6 +29,7 @@ export interface Pessoa {
   instagram_url: string | null;
   reference: string | null;
   notes: string | null;
+  mensagem_padrao: string | null;
   atendimento_humano: boolean;
   created_at: string;
   updated_at?: string;
@@ -42,7 +43,7 @@ export const DEFAULT_FORM: Partial<Pessoa> = {
   person_type: 'Pessoa', full_name: '', pronoun: 'Sr.', address: '', address_number: '', cep: '', neighborhood: '', city: '',
   latitude: null, longitude: null,
   housing_type: 'Própria', phone: '', destino: '', birth_date: '', email: '',
-  facebook_url: '', instagram_url: '', reference: '', notes: '',
+  facebook_url: '', instagram_url: '', reference: '', notes: '', mensagem_padrao: '',
   atendimento_humano: false
 };
 
@@ -439,6 +440,12 @@ const PeopleForm: React.FC<PeopleFormProps> = ({ initialData, mode, onClose, onS
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Instagram (Link)</label>
               <input type="text" value={form.instagram_url || ''} onChange={e => setForm({ ...form, instagram_url: e.target.value })}
                 placeholder="https://..."
+                className="w-full px-3.5 py-2.5 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div className="col-span-1 md:col-span-12">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Mensagem de Aniversário</label>
+              <textarea value={form.mensagem_padrao || ''} onChange={e => setForm({ ...form, mensagem_padrao: e.target.value })} rows={3}
+                placeholder="Ex: Olá {nome}, o Gabinete do Vereador Alex Peixoto deseja a você um feliz aniversário! (Deixe em branco para usar a mensagem padrão)"
                 className="w-full px-3.5 py-2.5 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500" />
             </div>
             <div className="col-span-1 md:col-span-12">
