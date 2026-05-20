@@ -18,7 +18,8 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-grab": "^0.1.33",
-    "react-leaflet": "^5.0.0"
+    "react-leaflet": "^5.0.0",
+    "react-quill-new": "^3.8.3"
   },
   "devDependencies": {
     "@types/leaflet": "^1.9.21",

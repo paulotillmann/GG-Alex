@@ -20,6 +20,8 @@ import RequerimentosScreen from '../pages/RequerimentosScreen';
 import DemandasScreen     from '../pages/DemandasScreen';
 import AtendimentoScreen from '../pages/AtendimentoScreen';
 import AnotacoesScreen    from '../pages/AnotacoesScreen';
+import OficiosScreen      from '../pages/OficiosScreen';
+import ConfigOficiosScreen from '../pages/admin/ConfigOficiosScreen';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface DashboardLayoutProps {
@@ -36,6 +38,7 @@ const ALL_SIDEBAR_ITEMS = [
   { id: 'auto-atendimento', slug: 'atendimentos', label: 'Auto Atendimento',     icon: Laptop },
   { id: 'requerimentos',    slug: 'requerimentos',label: 'Requerimentos',        icon: FileText },
   { id: 'demandas',         slug: 'demandas',     label: 'Demandas',             icon: CheckSquare },
+  { id: 'oficios',          slug: 'oficios',      label: 'Ofícios',              icon: FileText },
   { id: 'anotacoes',        slug: 'anotacoes',    label: 'Anotações',            icon: StickyNote },
 ];
 
@@ -43,6 +46,7 @@ const CONFIG_ITEMS = [
   { id: 'config/perfis',    label: 'Perfis de Acesso',     icon: Shield },
   { id: 'config/modulos',   label: 'Módulos',              icon: Puzzle },
   { id: 'config/usuarios',  label: 'Gestão de Usuários',   icon: UsersRound },
+  { id: 'config/oficios',   label: 'Sequência de Ofícios',  icon: FileText },
   { id: 'config/logs',      label: 'Logs de Atividade',    icon: ScrollText },
 ];
 
@@ -68,9 +72,11 @@ const renderContent = (activeMenu: string, children: React.ReactNode) => {
         if (activeMenu === 'auto-atendimento') return <AtendimentoScreen />;
         if (activeMenu === 'requerimentos')    return <RequerimentosScreen />;
         if (activeMenu === 'demandas')         return <DemandasScreen />;
+        if (activeMenu === 'oficios')          return <OficiosScreen />;
         if (activeMenu === 'config/perfis')    return <AccessProfiles />;
         if (activeMenu === 'config/modulos')   return <ModulesScreen />;
         if (activeMenu === 'config/usuarios')  return <UsersManagement />;
+        if (activeMenu === 'config/oficios')   return <ConfigOficiosScreen />;
         if (activeMenu === 'config/logs')      return <ActivityLogsScreen />;
         if (activeMenu === 'no-access') {
           return (

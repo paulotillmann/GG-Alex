@@ -5,6 +5,7 @@ import LoginScreen from './src/pages/LoginScreen';
 import RegisterScreen from './src/pages/RegisterScreen';
 import DashboardLayout from './src/layouts/DashboardLayout';
 import Dashboard from './src/pages/Dashboard';
+import OficioPrintStandalone from './src/pages/OficioPrintStandalone';
 
 type AuthView = 'login' | 'register';
 
@@ -53,12 +54,25 @@ const AppContent: React.FC = () => {
 };
 
 // ─── Root ─────────────────────────────────────────────────────────────────────
-const App: React.FC = () => (
-  <div className="antialiased text-slate-900 dark:text-slate-50 min-h-screen bg-slate-50 dark:bg-slate-900 transition-colors duration-300">
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
-  </div>
-);
+const App: React.FC = () => {
+  const params = new URLSearchParams(window.location.search);
+  const printOficioId = params.get('print_oficio');
+
+  if (printOficioId) {
+    return (
+      <div className="antialiased text-black bg-white min-h-screen transition-colors duration-300">
+        <OficioPrintStandalone id={printOficioId} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="antialiased text-slate-900 dark:text-slate-50 min-h-screen bg-slate-50 dark:bg-slate-900 transition-colors duration-300">
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
+    </div>
+  );
+};
 
 export default App;
