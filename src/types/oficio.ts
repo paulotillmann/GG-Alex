@@ -9,7 +9,9 @@ export interface Oficio {
   conteudo: string;
   assinatura_nome: string;
   assinatura_cargo: string;
-  status: 'Rascunho' | 'Emitido' | 'Cancelado';
+  status: 'ABERTA' | 'EM ATENDIMENTO' | 'AGUARDANDO RETORNO' | 'CONCLUÍDA';
+  solicitante?: string;
+  resposta?: string;
   created_at: string;
   updated_at: string;
   created_by?: string;

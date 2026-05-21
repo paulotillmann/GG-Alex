@@ -23,12 +23,13 @@ interface OficioFormProps {
   onSuccess: (msg: string) => void;
 }
 
-export const STATUSES_OFICIO = ['Rascunho', 'Emitido', 'Cancelado'] as const;
+export const STATUSES_OFICIO = ['ABERTA', 'EM ATENDIMENTO', 'AGUARDANDO RETORNO', 'CONCLUÍDA'] as const;
 
 export const STATUS_STYLES_OFICIO: Record<string, string> = {
-  Rascunho: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
-  Emitido: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400',
-  Cancelado: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
+  'ABERTA': 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+  'EM ATENDIMENTO': 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
+  'AGUARDANDO RETORNO': 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+  'CONCLUÍDA': 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
 };
 
 // Editor modules config (Must be outside component to prevent ReactQuill remount bugs)
@@ -71,9 +72,11 @@ const OficioForm: React.FC<OficioFormProps> = ({ initialData, mode, onClose, onS
     destinatario_cargo: '',
     assunto: '',
     conteudo: '',
-    assinatura_nome: '',
-    assinatura_cargo: '',
-    status: 'Rascunho',
+    assinatura_nome: 'Alex Peixoto',
+    assinatura_cargo: 'Vereador',
+    status: 'ABERTA',
+    solicitante: '',
+    resposta: '',
     ...initialData,
   });
 
@@ -131,6 +134,8 @@ const OficioForm: React.FC<OficioFormProps> = ({ initialData, mode, onClose, onS
             assinatura_nome: formData.assinatura_nome,
             assinatura_cargo: formData.assinatura_cargo,
             status: formData.status,
+            solicitante: formData.solicitante,
+            resposta: formData.resposta,
           })
           .eq('id', formData.id);
         if (updateError) throw updateError;
@@ -234,6 +239,22 @@ const OficioForm: React.FC<OficioFormProps> = ({ initialData, mode, onClose, onS
                 />
               </div>
             </div>
+
+            <div className="grid grid-cols-1 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Solicitante
+                </label>
+                <input
+                  type="text"
+                  name="solicitante"
+                  value={formData.solicitante || ''}
+                  onChange={handleChange}
+                  placeholder="Nome do solicitante..."
+                  className="w-full px-3 py-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                />
+              </div>
+            </div>
           </div>
 
           {/* Quadro: CONTEÚDO */}
@@ -269,7 +290,7 @@ const OficioForm: React.FC<OficioFormProps> = ({ initialData, mode, onClose, onS
               </label>
               <select
                 name="status"
-                value={formData.status || 'Rascunho'}
+                value={formData.status || 'ABERTA'}
                 onChange={handleChange}
                 className="w-full px-3 py-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
               >
@@ -374,6 +395,24 @@ const OficioForm: React.FC<OficioFormProps> = ({ initialData, mode, onClose, onS
                 onChange={handleChange}
                 placeholder="Ex: Secretário Executivo"
                 className="w-full px-3 py-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+              />
+            </div>
+          </div>
+
+          {/* Quadro: RESPOSTA */}
+          <div className="bg-white dark:bg-[#1C2434] rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-6 space-y-4">
+            <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
+              RESPOSTA DO OFÍCIO
+            </h3>
+            
+            <div>
+              <textarea
+                name="resposta"
+                value={formData.resposta || ''}
+                onChange={handleChange}
+                rows={4}
+                placeholder="Descreva a resposta recebida para este ofício..."
+                className="w-full px-3 py-2.5 border border-slate-300 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm resize-y min-h-[100px]"
               />
             </div>
           </div>

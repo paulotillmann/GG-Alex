@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import {
-  FileText, Plus, Search, Filter, Printer, Edit2, Trash2, Calendar, Eye, AlertCircle, RefreshCw, CheckCircle
+  FileText, Plus, Search, Filter, Printer, Edit2, Trash2, Calendar, Eye, AlertCircle, RefreshCw, CheckCircle, FileDown
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../lib/supabase';
 import { Oficio } from '../types/oficio';
 import OficioForm, { STATUS_STYLES_OFICIO } from '../components/forms/OficioForm';
 import OficioPrint from '../components/print/OficioPrint';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const OficiosScreen: React.FC = () => {
   const [oficios, setOficios] = useState<Oficio[]>([]);
@@ -88,9 +90,82 @@ const OficiosScreen: React.FC = () => {
     showSuccess(msg);
   };
 
+  const generateReport = () => {
+    if (filteredOficios.length === 0) {
+      alert("Nenhum registro encontrado para gerar o relatório.");
+      return;
+    }
+
+    const doc = new jsPDF('landscape', 'mm', 'a4');
+    
+    // Filtros
+    const filterTexts = [];
+    if (search) filterTexts.push(`Busca: "${search}"`);
+    if (statusFilter !== 'Todos') filterTexts.push(`Status: ${statusFilter}`);
+    if (dataInicio) filterTexts.push(`Início: ${new Date(dataInicio + 'T12:00:00').toLocaleDateString('pt-BR')}`);
+    if (dataFim) filterTexts.push(`Fim: ${new Date(dataFim + 'T12:00:00').toLocaleDateString('pt-BR')}`);
+    const filterString = filterTexts.length > 0 ? `Filtros aplicados - ${filterTexts.join(' | ')}` : 'Nenhum filtro aplicado (Todos os registros)';
+    
+    // Dados da tabela
+    const tableData = filteredOficios.map(o => [
+      o.numero || 'Aguardando Numeração',
+      new Date(o.data_emissao + 'T12:00:00').toLocaleDateString('pt-BR'),
+      `${o.destinatario_nome}${o.destinatario_cargo ? ` (${o.destinatario_cargo})` : ''}`,
+      o.solicitante || '-',
+      o.assunto || '',
+      o.resposta || '-',
+      o.status
+    ]);
+
+    autoTable(doc, {
+      startY: 32,
+      head: [['Número', 'Data de Emissão', 'Destinatário', 'Solicitante', 'Assunto', 'Resposta', 'Status']],
+      body: tableData,
+      theme: 'striped',
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [30, 43, 88], textColor: 255, fontStyle: 'bold' },
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+      margin: { top: 32, right: 14, bottom: 20, left: 14 },
+      didDrawPage: (data) => {
+        // Header de cada página
+        doc.setTextColor(0);
+        doc.setFontSize(14);
+        doc.setFont("helvetica", "bold");
+        doc.text("RELAÇÃO DE OFÍCIOS EMITIDOS", 14, 15);
+        
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "normal");
+        doc.text("GABINETE VEREADOR ALEX PEIXOTO", 14, 21);
+        
+        doc.setFontSize(8);
+        doc.text(filterString, 14, 27);
+
+        // Footer de cada página
+        let str = `Página ${doc.internal.getNumberOfPages()}`;
+        if (typeof doc.putTotalPages === 'function') {
+          str = str + ' de {total_pages_count_string}';
+        }
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(150);
+        const pageSize = doc.internal.pageSize;
+        const pageHeight = pageSize.height ? pageSize.height : pageSize.getHeight();
+        doc.text(str, 14, pageHeight - 10);
+      }
+    });
+
+    if (typeof doc.putTotalPages === 'function') {
+      doc.putTotalPages('{total_pages_count_string}');
+    }
+
+    const pdfBlob = doc.output('blob');
+    const pdfUrl = URL.createObjectURL(pdfBlob);
+    window.open(pdfUrl, '_blank');
+  };
+
   // Filtragem local
   const filteredOficios = oficios.filter((o) => {
-    const textToSearch = `${o.numero || ''} ${o.destinatario_nome} ${o.destinatario_cargo || ''} ${o.assunto}`.toLowerCase();
+    const textToSearch = `${o.numero || ''} ${o.destinatario_nome} ${o.destinatario_cargo || ''} ${o.assunto} ${o.solicitante || ''} ${o.resposta || ''}`.toLowerCase();
     const matchesSearch = textToSearch.includes(search.toLowerCase());
     
     const matchesStatus = statusFilter === 'Todos' || o.status === statusFilter;
@@ -108,7 +183,7 @@ const OficiosScreen: React.FC = () => {
 
   if (showForm) {
     return (
-      <div className="p-6 max-w-7xl mx-auto">
+      <div className="py-6 px-[30px] w-full max-w-none">
         <OficioForm
           mode={formMode}
           initialData={selectedOficio}
@@ -123,30 +198,39 @@ const OficiosScreen: React.FC = () => {
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
+    <div className="py-6 px-[30px] w-full max-w-none space-y-6">
       
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-heading font-bold text-slate-900 dark:text-white flex items-center gap-2">
             <FileText className="h-7 w-7 text-blue-600 dark:text-blue-400" />
-            Gestão de Ofícios
+            Ofícios
           </h1>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
             Criação, controle de numeração oficial, emissão de PDF e impressão nativa em formato A4
           </p>
         </div>
-        <button
-          onClick={() => {
-            setFormMode('create');
-            setSelectedOficio(null);
-            setShowForm(true);
-          }}
-          className="flex items-center justify-center gap-2 px-4 py-2.5 bg-[#1E2B58] hover:bg-[#151E3F] text-white rounded-lg text-sm font-medium transition-colors shadow-sm self-start sm:self-auto"
-        >
-          <Plus className="h-4 w-4" />
-          Novo Ofício
-        </button>
+        <div className="flex flex-wrap gap-3">
+          <button
+            onClick={generateReport}
+            className="flex items-center justify-center gap-2 px-4 py-2.5 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-lg text-sm font-medium hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors shadow-sm self-start sm:self-auto"
+          >
+            <FileDown className="h-4 w-4" />
+            Imprimir Relatório
+          </button>
+          <button
+            onClick={() => {
+              setFormMode('create');
+              setSelectedOficio(null);
+              setShowForm(true);
+            }}
+            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-[#1E2B58] hover:bg-[#151E3F] text-white rounded-lg text-sm font-medium transition-colors shadow-sm self-start sm:self-auto"
+          >
+            <Plus className="h-4 w-4" />
+            Novo Ofício
+          </button>
+        </div>
       </div>
 
       {/* Toast */}
@@ -200,9 +284,10 @@ const OficiosScreen: React.FC = () => {
               className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
             >
               <option value="Todos">Todos os Status</option>
-              <option value="Rascunho">Rascunho</option>
-              <option value="Emitido">Emitido</option>
-              <option value="Cancelado">Cancelado</option>
+              <option value="ABERTA">Abertas</option>
+              <option value="EM ATENDIMENTO">Em Atendimento</option>
+              <option value="AGUARDANDO RETORNO">Aguardando Retorno</option>
+              <option value="CONCLUÍDA">Concluídas</option>
             </select>
           </div>
 
@@ -269,10 +354,12 @@ const OficiosScreen: React.FC = () => {
             <table className="w-full border-collapse text-left">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                  <th className="py-4 px-6">Número / Emissão</th>
+                  <th className="py-4 px-6">Número</th>
+                  <th className="py-4 px-6">Data de Emissão</th>
                   <th className="py-4 px-6">Destinatário</th>
+                  <th className="py-4 px-6">Solicitante</th>
                   <th className="py-4 px-6">Assunto</th>
-                  <th className="py-4 px-6">Assinatura</th>
+                  <th className="py-4 px-6">Resposta</th>
                   <th className="py-4 px-6 text-center">Status</th>
                   <th className="py-4 px-6 text-right">Ações</th>
                 </tr>
@@ -283,24 +370,24 @@ const OficiosScreen: React.FC = () => {
                     key={o.id}
                     className="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-colors"
                   >
-                    <td className="py-4 px-6">
-                      <div className="font-semibold text-slate-900 dark:text-white">
-                        {o.numero || <span className="text-xs text-amber-500 font-medium">Aguardando Numeração</span>}
-                      </div>
-                      <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                        {new Date(o.data_emissao + 'T12:00:00').toLocaleDateString('pt-BR')}
-                      </div>
+                    <td className="py-4 px-6 font-semibold text-slate-900 dark:text-white">
+                      {o.numero || <span className="text-xs text-amber-500 font-medium">Aguardando Numeração</span>}
+                    </td>
+                    <td className="py-4 px-6 text-slate-600 dark:text-slate-400">
+                      {new Date(o.data_emissao + 'T12:00:00').toLocaleDateString('pt-BR')}
                     </td>
                     <td className="py-4 px-6">
                       <div className="font-medium text-slate-900 dark:text-white">{o.destinatario_nome}</div>
                       <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{o.destinatario_cargo}</div>
                     </td>
+                    <td className="py-4 px-6 font-medium text-slate-900 dark:text-white">
+                      {o.solicitante || '-'}
+                    </td>
                     <td className="py-4 px-6 max-w-xs truncate" title={o.assunto}>
                       {o.assunto}
                     </td>
-                    <td className="py-4 px-6">
-                      <div className="text-xs font-medium text-slate-800 dark:text-slate-200">{o.assinatura_nome || '-'}</div>
-                      <div className="text-[10px] text-slate-500 dark:text-slate-400">{o.assinatura_cargo}</div>
+                    <td className="py-4 px-6 text-slate-600 dark:text-slate-300">
+                      {o.resposta || '-'}
                     </td>
                     <td className="py-4 px-6 text-center">
                       <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold ${STATUS_STYLES_OFICIO[o.status] ?? ''}`}>

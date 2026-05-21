@@ -1,5 +1,6 @@
 import React from 'react';
 import { Oficio } from '../../types/oficio';
+import logoCamara from '../../assets/logos/logo_camaramunicipal-oficial.png';
 
 interface OficioPrintProps {
   oficio: Oficio | null;
@@ -25,27 +26,46 @@ const OficioPrint: React.FC<OficioPrintProps> = ({ oficio }) => {
   return (
     <div id="printable-oficio" className="hidden print:block bg-white text-black p-10 font-serif max-w-[21cm] mx-auto min-h-[29.7cm] print:min-h-0 print:m-0 print:p-0">
 
-      {/* Número do Ofício */}
-      <div className="mb-6 font-bold text-lg uppercase">
-        {oficio.numero}
+      {/* Cabeçalho Oficial */}
+      <div className="flex flex-col items-center text-center mb-10">
+        <img 
+          src={logoCamara} 
+          alt="Brasão Câmara Municipal" 
+          className="h-28 w-auto object-contain mb-3" 
+        />
+        <h2 className="text-base font-bold tracking-wide text-black uppercase font-serif">
+          Câmara Municipal de Araguari
+        </h2>
+        <p className="text-xs font-bold tracking-widest text-black uppercase font-serif mt-0.5">
+          Minas Gerais
+        </p>
       </div>
 
       {/* Local e Data */}
-      <div className="text-right mb-12">
-        Araguari, {formatarDataExtenso(oficio.data_emissao)}.
+      <div className="text-right mb-8 text-sm">
+        Araguari, {formatarDataExtenso(oficio.data_emissao)}
+      </div>
+
+      {/* Informações de Controle (Ofício, Assunto, Órgão) */}
+      <div className="mb-10 text-sm leading-relaxed">
+        <p><strong>Ofício:</strong> {oficio.numero || '___/___'}</p>
+        <p><strong>Assunto:</strong> {oficio.assunto}</p>
+        <p><strong>Órgão:</strong> Gabinete do Vereador Alex Peixoto</p>
       </div>
 
       {/* Destinatário */}
-      <div className="mb-10 leading-snug">
-        <p>{oficio.destinatario_tratamento}</p>
-        <p className="font-bold">{oficio.destinatario_nome}</p>
-        <p>{oficio.destinatario_cargo}</p>
-      </div>
+      {(oficio.destinatario_nome || oficio.destinatario_cargo) && (
+        <div className="mb-8 leading-snug text-sm">
+          <p className="font-bold">{oficio.destinatario_nome}</p>
+          <p>{oficio.destinatario_cargo}</p>
+        </div>
+      )}
 
-      {/* Assunto */}
-      <div className="mb-10 font-bold">
-        Assunto: {oficio.assunto}
-      </div>
+      {oficio.destinatario_tratamento && (
+        <div className="mb-8 text-sm">
+          <p>{oficio.destinatario_tratamento},</p>
+        </div>
+      )}
 
       {/* Corpo do Ofício */}
       <div 
