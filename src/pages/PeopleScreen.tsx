@@ -20,6 +20,21 @@ const LABEL_SIZES = [
   { id: '6187', name: 'Pimaco 6187 (44,45 x 12,7 mm)', width: 44.45, height: 12.7 },
 ];
 
+const MONTHS = [
+  { value: '01', label: 'Janeiro' },
+  { value: '02', label: 'Fevereiro' },
+  { value: '03', label: 'Março' },
+  { value: '04', label: 'Abril' },
+  { value: '05', label: 'Maio' },
+  { value: '06', label: 'Junho' },
+  { value: '07', label: 'Julho' },
+  { value: '08', label: 'Agosto' },
+  { value: '09', label: 'Setembro' },
+  { value: '10', label: 'Outubro' },
+  { value: '11', label: 'Novembro' },
+  { value: '12', label: 'Dezembro' }
+];
+
 const PeopleScreen: React.FC = () => {
   const [people, setPeople] = useState<Pessoa[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,6 +42,7 @@ const PeopleScreen: React.FC = () => {
   const [filterType, setFilterType] = useState('');
   const [filterNeighborhood, setFilterNeighborhood] = useState('');
   const [filterCity, setFilterCity] = useState('');
+  const [filterBirthdayMonth, setFilterBirthdayMonth] = useState('');
   
   const uniqueNeighborhoods = React.useMemo(() => {
     return Array.from(new Set(people.map(p => p.neighborhood).filter(Boolean))) as string[];
@@ -131,7 +147,14 @@ const PeopleScreen: React.FC = () => {
   const itemsPerPage = 8;
   
   // Reseta paginação na busca/filtro
-  useEffect(() => { setCurrentPage(1); }, [search, filterType, filterNeighborhood, filterCity]);
+  useEffect(() => { setCurrentPage(1); }, [search, filterType, filterNeighborhood, filterCity, filterBirthdayMonth]);
+
+  // Ao selecionar um mês de aniversário, define a ordenação por data de nascimento como padrão (crescente)
+  useEffect(() => {
+    if (filterBirthdayMonth) {
+      setSortConfig({ key: 'birth_date', direction: 'asc' });
+    }
+  }, [filterBirthdayMonth]);
 
   // Garante que ao mudar de "página" (abrir ou fechar form) o scroll volte ao topo automaticamente
   useEffect(() => {
@@ -150,7 +173,23 @@ const PeopleScreen: React.FC = () => {
     const matchNeighb = filterNeighborhood ? p.neighborhood === filterNeighborhood : true;
     const matchCity = filterCity ? p.city === filterCity : true;
 
-    return matchSearch && matchType && matchNeighb && matchCity;
+    // Filtro de aniversariantes por mês independente do ano
+    let matchBirthdayMonth = true;
+    if (filterBirthdayMonth) {
+      if (p.birth_date) {
+        const parts = p.birth_date.split('-');
+        if (parts.length === 3) {
+          // parts[1] é o mês '01', '02', ..., '12'
+          matchBirthdayMonth = parts[1] === filterBirthdayMonth;
+        } else {
+          matchBirthdayMonth = false;
+        }
+      } else {
+        matchBirthdayMonth = false;
+      }
+    }
+
+    return matchSearch && matchType && matchNeighb && matchCity && matchBirthdayMonth;
   });
 
   // ── Ordenação ──────────────────────────────────────────────────────────
@@ -158,6 +197,42 @@ const PeopleScreen: React.FC = () => {
     if (!sortConfig) return 0;
     const { key, direction } = sortConfig;
     
+    // Tratamento especial para ordenação por data de nascimento
+    if (key === 'birth_date') {
+      if (!a.birth_date) return direction === 'asc' ? 1 : -1;
+      if (!b.birth_date) return direction === 'asc' ? -1 : 1;
+      
+      const partsA = a.birth_date.split('-');
+      const partsB = b.birth_date.split('-');
+      
+      if (partsA.length === 3 && partsB.length === 3) {
+        // Se houver um mês filtrado ativo, a ordenação foca no dia do aniversário (parts[2])
+        if (filterBirthdayMonth) {
+          const dayA = parseInt(partsA[2], 10);
+          const dayB = parseInt(partsB[2], 10);
+          if (dayA !== dayB) {
+            return direction === 'asc' ? dayA - dayB : dayB - dayA;
+          }
+          // Em caso de empate no dia, desempatar por ano
+          const yearA = parseInt(partsA[0], 10);
+          const yearB = parseInt(partsB[0], 10);
+          if (yearA !== yearB) {
+            return direction === 'asc' ? yearA - yearB : yearB - yearA;
+          }
+        } else {
+          // Ordenação completa de data (ano-mês-dia)
+          const dateA = new Date(a.birth_date).getTime();
+          const dateB = new Date(b.birth_date).getTime();
+          if (dateA !== dateB) {
+            return direction === 'asc' ? dateA - dateB : dateB - dateA;
+          }
+        }
+      }
+      
+      // Fallback para nome completo em caso de datas idênticas ou formatos inválidos
+      return (a.full_name || '').localeCompare(b.full_name || '');
+    }
+
     // Pegar valores e tratar nulls
     const valA = (a[key] || '').toString().toLowerCase();
     const valB = (b[key] || '').toString().toLowerCase();
@@ -1023,6 +1098,7 @@ const PeopleScreen: React.FC = () => {
     if (filterType) filterTexts.push(`Tipo: ${filterType}`);
     if (filterCity) filterTexts.push(`Cidade: ${filterCity}`);
     if (filterNeighborhood) filterTexts.push(`Bairro: ${filterNeighborhood}`);
+    if (filterBirthdayMonth) filterTexts.push(`Mês de Aniversário: ${MONTHS.find(m => m.value === filterBirthdayMonth)?.label}`);
     const filterString = filterTexts.length > 0 ? `Filtros aplicados - ${filterTexts.join(' | ')}` : 'Nenhum filtro aplicado (Todos os registros)';
     
     // Table
@@ -1258,6 +1334,15 @@ const PeopleScreen: React.FC = () => {
             >
               <option value="">Todos os Bairros</option>
               {uniqueNeighborhoods.map(b => <option key={b} value={b}>{b}</option>)}
+            </select>
+
+            <select
+              value={filterBirthdayMonth}
+              onChange={(e) => setFilterBirthdayMonth(e.target.value)}
+              className="w-full sm:w-44 px-3 py-2 border border-slate-300 dark:border-[#2C354A] rounded-lg bg-slate-50 dark:bg-[#243046] text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="">Aniversariante (Mês)</option>
+              {MONTHS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
             </select>
           </div>
           <div className="flex items-center gap-4">
