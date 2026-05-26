@@ -97,8 +97,36 @@ const PeopleScreen: React.FC = () => {
   // ── Fetch ──────────────────────────────────────────────────────────────
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase.from('pessoa').select('*').order('created_at', { ascending: false });
-    setPeople((data ?? []) as Pessoa[]);
+    
+    let allPeople: Pessoa[] = [];
+    let from = 0;
+    const limit = 1000;
+    let hasMore = true;
+
+    while (hasMore) {
+      const { data, error } = await supabase
+        .from('pessoa')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .range(from, from + limit - 1);
+
+      if (error) {
+        console.error("Erro ao buscar pessoas:", error.message);
+        break;
+      }
+
+      if (data && data.length > 0) {
+        allPeople = [...allPeople, ...data];
+        from += limit;
+        if (data.length < limit) {
+          hasMore = false;
+        }
+      } else {
+        hasMore = false;
+      }
+    }
+
+    setPeople(allPeople as Pessoa[]);
     
     // Buscar aniversariantes de hoje
     const { data: bData } = await supabase.rpc('get_aniversariantes_hoje');
