@@ -482,7 +482,7 @@ const PeopleScreen: React.FC = () => {
       return parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : ds;
     };
 
-    const telefones = [person.phone ? maskPhone(person.phone) : null, person.telefone_extra ? maskPhone(person.telefone_extra) : null].filter(Boolean).join(' / ');
+    const telefones = [person.phone ? maskPhone(person.phone) : null, person.phone_extra ? maskPhone(person.phone_extra) : null].filter(Boolean).join(' / ');
     
     let addressLine = person.address || '';
     if (person.address_number) addressLine += `, ${person.address_number}`;
@@ -793,7 +793,7 @@ const PeopleScreen: React.FC = () => {
     let allFichasHtml = '';
 
     fullPeopleData.forEach(({ person, dependentes, servicos }, index) => {
-      const telefones = [person.phone ? maskPhone(person.phone) : null, person.telefone_extra ? maskPhone(person.telefone_extra) : null].filter(Boolean).join(' / ');
+      const telefones = [person.phone ? maskPhone(person.phone) : null, person.phone_extra ? maskPhone(person.phone_extra) : null].filter(Boolean).join(' / ');
       
       let addressLine = person.address || '';
       if (person.address_number) addressLine += `, ${person.address_number}`;
