@@ -232,13 +232,24 @@ ALTER TABLE public.demandas ENABLE ROW LEVEL SECURITY;
 -- ==========================================
 
 CREATE OR REPLACE VIEW public.vw_anotacoes_com_contato AS
+WITH unique_pessoa AS (
+    SELECT DISTINCT ON (REPLACE(REPLACE(REPLACE(REPLACE(phone, '+', ''), ' ', ''), '-', ''), '(', ''))
+        id,
+        full_name,
+        phone,
+        REPLACE(REPLACE(REPLACE(REPLACE(phone, '+', ''), ' ', ''), '-', ''), '(', '') AS clean_phone,
+        updated_at,
+        created_at
+    FROM public.pessoa
+    WHERE phone IS NOT NULL AND phone <> ''
+    ORDER BY REPLACE(REPLACE(REPLACE(REPLACE(phone, '+', ''), ' ', ''), '-', ''), '(', ''), updated_at DESC, created_at DESC
+)
 SELECT 
     a.*,
     p.full_name as contato_nome
 FROM public.anotacoes a
-LEFT JOIN public.pessoa p ON (
-    REPLACE(REPLACE(REPLACE(REPLACE(a.whatsapp, '+', ''), ' ', ''), '-', ''), '(', '') = 
-    REPLACE(REPLACE(REPLACE(REPLACE(p.phone, '+', ''), ' ', ''), '-', ''), '(', '')
+LEFT JOIN unique_pessoa p ON (
+    REPLACE(REPLACE(REPLACE(REPLACE(a.whatsapp, '+', ''), ' ', ''), '-', ''), '(', '') = p.clean_phone
 );
 
 GRANT SELECT ON public.vw_anotacoes_com_contato TO authenticated;
@@ -453,6 +464,88 @@ BEGIN
   RETURN NEW;
 END;
 $$;
+
+CREATE OR REPLACE FUNCTION public.get_pessoa_dashboard_stats()
+RETURNS json AS $$
+DECLARE
+    v_total bigint;
+    v_this_month bigint;
+    v_weekly json;
+    v_monthly json;
+    v_result json;
+BEGIN
+    -- Total count
+    SELECT COUNT(*) INTO v_total FROM public.pessoa;
+
+    -- This month count
+    SELECT COUNT(*) INTO v_this_month 
+    FROM public.pessoa 
+    WHERE created_at >= DATE_TRUNC('month', now());
+
+    -- Weekly chart data (last 7 days, including today)
+    WITH RECURSIVE last_7_days AS (
+        SELECT (CURRENT_DATE - i)::date AS d
+        FROM generate_series(0, 6) AS i
+    ),
+    weekly_counts AS (
+        SELECT 
+            d as date_val,
+            TO_CHAR(d, 'DD/MM') || '(' || 
+            CASE EXTRACT(DOW FROM d)
+                WHEN 0 THEN 'dom'
+                WHEN 1 THEN 'seg'
+                WHEN 2 THEN 'ter'
+                WHEN 3 THEN 'qua'
+                WHEN 4 THEN 'qui'
+                WHEN 5 THEN 'sex'
+                WHEN 6 THEN 'sab'
+            END || ')' AS label,
+            COUNT(p.id) AS count
+        FROM last_7_days l
+        LEFT JOIN public.pessoa p ON p.created_at::date = l.d
+        GROUP BY d
+        ORDER BY d ASC
+    )
+    SELECT json_agg(json_build_object('label', label, 'count', count))
+    INTO v_weekly
+    FROM weekly_counts;
+
+    -- Monthly chart data (months of current year)
+    WITH months_of_year AS (
+        SELECT m AS month_num,
+               CASE m
+                   WHEN 1 THEN 'Jan' WHEN 2 THEN 'Fev' WHEN 3 THEN 'Mar' WHEN 4 THEN 'Abr'
+                   WHEN 5 THEN 'Mai' WHEN 6 THEN 'Jun' WHEN 7 THEN 'Jul' WHEN 8 THEN 'Ago'
+                   WHEN 9 THEN 'Set' WHEN 10 THEN 'Out' WHEN 11 THEN 'Nov' WHEN 12 THEN 'Dez'
+               END AS label
+        FROM generate_series(1, 12) AS m
+    ),
+    monthly_counts AS (
+        SELECT 
+            m.month_num,
+            m.label,
+            COUNT(p.id) AS count
+        FROM months_of_year m
+        LEFT JOIN public.pessoa p ON EXTRACT(MONTH FROM p.created_at) = m.month_num 
+                                  AND EXTRACT(YEAR FROM p.created_at) = EXTRACT(YEAR FROM now())
+        GROUP BY m.month_num, m.label
+        ORDER BY m.month_num ASC
+    )
+    SELECT json_agg(json_build_object('month', label, 'count', count))
+    INTO v_monthly
+    FROM monthly_counts;
+
+    -- Build final result
+    v_result := json_build_object(
+        'total', v_total,
+        'thisMonth', v_this_month,
+        'weekly', v_weekly,
+        'monthly', v_monthly
+    );
+
+    RETURN v_result;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- ==========================================
 -- TRIGGERS

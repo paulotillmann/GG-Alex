@@ -71,9 +71,9 @@ const Dashboard: React.FC = () => {
     const fetchDashboardData = async () => {
       setLoading(true);
       try {
-        // Person Data
-        const { data: pessoaData, error: pessoaError } = await supabase.from('pessoa').select('created_at');
-        if (pessoaError) throw pessoaError;
+        // Person Data from high-performance RPC function
+        const { data: rpcStats, error: rpcError } = await supabase.rpc('get_pessoa_dashboard_stats');
+        if (rpcError) throw rpcError;
         
         // Requerimentos Count
         const { count: reqCount, error: reqError } = await supabase.from('requerimento').select('*', { count: 'exact', head: true });
@@ -111,61 +111,15 @@ const Dashboard: React.FC = () => {
           .order('horario_inicio', { ascending: true });
         if (agendaError) throw agendaError;
         
-        const rows = pessoaData || [];
-        let total = 0;
-        let monthCount = 0;
-
-        // Inicia array com os meses do ano zerados
-        const monthMap = new Array(12).fill(0);
-        
-        // Inicia array para os ultimos 7 dias
-        const now = new Date();
-        const last7Days = [];
-        const WEEKDAYS_S = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab'];
-        
-        for (let i = 6; i >= 0; i--) {
-          const d = new Date(now);
-          d.setDate(d.getDate() - i);
-          const dateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-          last7Days.push({
-            label: `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth()+1).toString().padStart(2, '0')}(${WEEKDAYS_S[d.getDay()]})`,
-            dateString: dateStr,
-            count: 0
-          });
-        }
-
-        rows.forEach(p => {
-          total++;
-          const d = new Date(p.created_at);
-          
-          if (isThisMonth(d)) monthCount++;
-          
-          // Verifica se encaixa nos ultimos 7 dias usando string ISO local
-          const pDateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-          const dayIndex = last7Days.findIndex(day => day.dateString === pDateStr);
-          if (dayIndex !== -1) {
-            last7Days[dayIndex].count++;
-          }
-          
-          // Verifica se é deste ano para o gráfico mensal
-          if (d.getFullYear() === now.getFullYear()) {
-            monthMap[d.getMonth()]++;
-          }
+        setStats({ 
+          total: rpcStats.total, 
+          thisMonth: rpcStats.thisMonth, 
+          messagesToday: msgsToday || 0, 
+          reqCount: reqCount || 0, 
+          demandasConcluidasMes: demandasCount || 0 
         });
-
-        const aggregatedChart = MONTHS.map((m, i) => ({
-          month: m,
-          count: monthMap[i]
-        }));
-
-        const aggregatedWeekly = last7Days.map(d => ({
-          month: d.label,
-          count: d.count
-        }));
-
-        setStats({ total, thisMonth: monthCount, messagesToday: msgsToday || 0, reqCount: reqCount || 0, demandasConcluidasMes: demandasCount || 0 });
-        setChartData(aggregatedChart);
-        setWeeklyData(aggregatedWeekly);
+        setChartData(rpcStats.monthly || []);
+        setWeeklyData(rpcStats.weekly || []);
         setAgendaItems((agendaData ?? []) as AgendaItem[]);
 
       } catch (err) {
