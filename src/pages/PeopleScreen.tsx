@@ -74,6 +74,21 @@ const PeopleScreen: React.FC = () => {
   const [birthdayStatus, setBirthdayStatus] = useState<Record<string, { status: 'success' | 'error' | 'pending', error?: string }>>({});
   const [cronActive, setCronActive] = useState<boolean>(false);
 
+  // Bulk WhatsApp Modal state
+  const [showBulkSmsModal, setShowBulkSmsModal] = useState(false);
+  const [bulkMessage, setBulkMessage] = useState('');
+  const [sendingBulk, setSendingBulk] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState({
+    total: 0,
+    sent: 0,
+    failed: 0,
+    currentIndex: 0,
+    currentInterval: 0,
+  });
+  const [bulkStatusList, setBulkStatusList] = useState<Record<string, 'pending' | 'sending' | 'success' | 'error'>>({});
+  const [bulkErrorList, setBulkErrorList] = useState<Record<string, string>>({});
+  const [isBulkCancelled, setIsBulkCancelled] = useState(false);
+
   // ─── Auto-open form check (Vindo do Dashboard) ──────────────────────────────
   useEffect(() => {
     const autoAction = sessionStorage.getItem('autoOpenForm_pessoas');
@@ -333,6 +348,107 @@ const PeopleScreen: React.FC = () => {
   const showSuccess = (msg: string) => {
     setSuccessMsg(msg);
     setTimeout(() => setSuccessMsg(null), 3000);
+  };
+
+  const isCancelledRef = React.useRef(false);
+
+  const sendBulkWhatsApp = async () => {
+    if (!bulkMessage.trim()) return;
+    setSendingBulk(true);
+    setIsBulkCancelled(false);
+    isCancelledRef.current = false;
+    
+    const selectedPeople = people.filter(p => selectedIds.includes(p.id));
+    
+    const initialStatus: Record<string, 'pending' | 'sending' | 'success' | 'error'> = {};
+    selectedPeople.forEach(p => {
+      initialStatus[p.id] = 'pending';
+    });
+    setBulkStatusList(initialStatus);
+    setBulkErrorList({});
+    
+    setBulkProgress({
+      total: selectedPeople.length,
+      sent: 0,
+      failed: 0,
+      currentIndex: 0,
+      currentInterval: 0
+    });
+
+    let sentCount = 0;
+    let failedCount = 0;
+    
+    for (let i = 0; i < selectedPeople.length; i++) {
+      if (isCancelledRef.current) {
+        break;
+      }
+
+      const person = selectedPeople[i];
+      
+      setBulkProgress(prev => ({
+        ...prev,
+        currentIndex: i
+      }));
+
+      setBulkStatusList(prev => ({ ...prev, [person.id]: 'sending' }));
+
+      try {
+        if (!person.phone) {
+          throw new Error("Sem telefone.");
+        }
+
+        const response = await supabase.functions.invoke('send-custom-wpp', {
+          body: {
+            phone: person.phone,
+            fullName: person.full_name,
+            personId: person.id,
+            message: bulkMessage
+          }
+        });
+
+        if (response.error) {
+          throw response.error;
+        }
+
+        sentCount++;
+        setBulkStatusList(prev => ({ ...prev, [person.id]: 'success' }));
+        setBulkProgress(prev => ({ ...prev, sent: sentCount }));
+
+      } catch (err: any) {
+        failedCount++;
+        const errMsg = err.message || "Erro de envio.";
+        setBulkStatusList(prev => ({ ...prev, [person.id]: 'error' }));
+        setBulkErrorList(prev => ({ ...prev, [person.id]: errMsg }));
+        setBulkProgress(prev => ({ ...prev, failed: failedCount }));
+      }
+
+      if (i < selectedPeople.length - 1 && !isCancelledRef.current) {
+        const intervals = [15, 30, 45];
+        const chosenInterval = intervals[Math.floor(Math.random() * intervals.length)];
+        
+        for (let sec = chosenInterval; sec > 0; sec--) {
+          if (isCancelledRef.current) {
+            break;
+          }
+          setBulkProgress(prev => ({ ...prev, currentInterval: sec }));
+          await new Promise(r => setTimeout(r, 1000));
+        }
+
+        if (isCancelledRef.current) {
+          break;
+        }
+        setBulkProgress(prev => ({ ...prev, currentInterval: 0 }));
+      }
+    }
+
+    setSendingBulk(false);
+    setBulkProgress(prev => ({ ...prev, currentInterval: 0 }));
+    
+    if (isCancelledRef.current) {
+      showSuccess("Envio em lote interrompido pelo usuário.");
+    } else {
+      showSuccess(`Envio em lote concluído! Sucessos: ${sentCount}, Falhas: ${failedCount}`);
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -1234,18 +1350,33 @@ const PeopleScreen: React.FC = () => {
 
         <div className="flex flex-wrap items-center gap-3">
           {selectedIds.length > 0 && (
-            <button
-              onClick={printSelectedFichas}
-              disabled={printingSelected}
-              className="flex items-center px-4 py-2.5 bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/30 dark:hover:bg-blue-800/40 text-blue-700 dark:text-blue-300 rounded-lg text-sm font-medium transition-colors border border-blue-200 dark:border-blue-800 shadow-sm"
-            >
-              {printingSelected ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <Printer className="h-4 w-4 mr-2" />
-              )}
-              {printingSelected ? 'Gerando Fichas...' : `Imprimir Selecionados (${selectedIds.length})`}
-            </button>
+            <>
+              <button
+                onClick={printSelectedFichas}
+                disabled={printingSelected}
+                className="flex items-center px-4 py-2.5 bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/30 dark:hover:bg-blue-800/40 text-blue-700 dark:text-blue-300 rounded-lg text-sm font-medium transition-colors border border-blue-200 dark:border-blue-800 shadow-sm"
+              >
+                {printingSelected ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Printer className="h-4 w-4 mr-2" />
+                )}
+                {printingSelected ? 'Gerando Fichas...' : `Imprimir Selecionados (${selectedIds.length})`}
+              </button>
+
+              <button
+                onClick={() => {
+                  isCancelledRef.current = false;
+                  setIsBulkCancelled(false);
+                  setBulkMessage('');
+                  setShowBulkSmsModal(true);
+                }}
+                className="flex items-center px-4 py-2.5 bg-green-100 hover:bg-green-200 dark:bg-green-900/30 dark:hover:bg-green-800/40 text-green-700 dark:text-green-300 rounded-lg text-sm font-medium transition-colors border border-green-200 dark:border-green-800 shadow-sm"
+              >
+                <Send className="h-4 w-4 mr-2" />
+                Enviar WhatsApp ({selectedIds.length})
+              </button>
+            </>
           )}
 
           <button
@@ -1786,6 +1917,192 @@ const PeopleScreen: React.FC = () => {
                   {sendingBirthdays ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                   Notificar Todos Agora
                 </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal de Envio de WhatsApp em Lote */}
+      <AnimatePresence>
+        {showBulkSmsModal && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-2xl shadow-2xl p-6 max-h-[90vh] flex flex-col"
+            >
+              <div className="flex items-center justify-between mb-4 pb-4 border-b border-slate-100 dark:border-slate-800">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center text-green-600 dark:text-green-400">
+                    <Send className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Enviar WhatsApp em Lote</h3>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">{selectedIds.length} contatos selecionados</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => {
+                    if (sendingBulk) {
+                      if (confirm("O envio está em andamento. Deseja realmente fechar e interromper?")) {
+                        isCancelledRef.current = true;
+                        setIsBulkCancelled(true);
+                        setShowBulkSmsModal(false);
+                      }
+                    } else {
+                      setShowBulkSmsModal(false);
+                    }
+                  }} 
+                  className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                >
+                  <Plus className="h-6 w-6 rotate-45" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto mb-4 space-y-4 pr-1">
+                {/* Editor da Mensagem */}
+                <div className="space-y-2">
+                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300">
+                    Mensagem a ser enviada:
+                  </label>
+                  <textarea
+                    value={bulkMessage}
+                    onChange={(e) => setBulkMessage(e.target.value)}
+                    disabled={sendingBulk}
+                    rows={4}
+                    placeholder="Digite sua mensagem aqui..."
+                    className="w-full p-3 border border-slate-300 dark:border-[#2C354A] rounded-lg bg-slate-50 dark:bg-[#243046] text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-slate-400 disabled:opacity-50"
+                  />
+                  <div className="text-xs text-slate-500 dark:text-slate-400 flex flex-wrap gap-2">
+                    <span>Tags dinâmicas:</span>
+                    <code className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 rounded font-semibold text-blue-600 dark:text-blue-400 cursor-pointer" title="Substitui pelo primeiro nome da pessoa" onClick={() => !sendingBulk && setBulkMessage(prev => prev + '{nome}')}>{"{nome}"}</code>
+                    <code className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 rounded font-semibold text-blue-600 dark:text-blue-400 cursor-pointer" title="Substitui pelo nome completo" onClick={() => !sendingBulk && setBulkMessage(prev => prev + '{nome_completo}')}>{"{nome_completo}"}</code>
+                  </div>
+                </div>
+
+                {/* Painel de Status do Envio */}
+                {(sendingBulk || bulkProgress.sent > 0 || bulkProgress.failed > 0) && (
+                  <div className="space-y-4 border border-slate-100 dark:border-slate-800/80 rounded-xl p-4 bg-slate-50/50 dark:bg-slate-900/30">
+                    {/* Barra de Progresso */}
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-xs font-semibold text-slate-600 dark:text-slate-400">
+                        <span>Progresso Geral</span>
+                        <span>{Math.round(((bulkProgress.sent + bulkProgress.failed) / bulkProgress.total) * 100)}% ({bulkProgress.sent + bulkProgress.failed} / {bulkProgress.total})</span>
+                      </div>
+                      <div className="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-2.5 overflow-hidden">
+                        <div 
+                          className="bg-green-500 h-2.5 rounded-full transition-all duration-300"
+                          style={{ width: `${((bulkProgress.sent + bulkProgress.failed) / bulkProgress.total) * 100}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Contadores */}
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <div className="p-2.5 bg-white dark:bg-[#1C2434] rounded-lg border border-slate-100 dark:border-slate-800 shadow-sm">
+                        <span className="block text-[10px] uppercase font-semibold text-slate-400">Sucesso</span>
+                        <span className="text-lg font-bold text-green-600 dark:text-green-400">{bulkProgress.sent}</span>
+                      </div>
+                      <div className="p-2.5 bg-white dark:bg-[#1C2434] rounded-lg border border-slate-100 dark:border-slate-800 shadow-sm">
+                        <span className="block text-[10px] uppercase font-semibold text-slate-400">Falha</span>
+                        <span className="text-lg font-bold text-red-600 dark:text-red-400">{bulkProgress.failed}</span>
+                      </div>
+                      <div className="p-2.5 bg-white dark:bg-[#1C2434] rounded-lg border border-slate-100 dark:border-slate-800 shadow-sm">
+                        <span className="block text-[10px] uppercase font-semibold text-slate-400">Restante</span>
+                        <span className="text-lg font-bold text-slate-600 dark:text-slate-400">{bulkProgress.total - (bulkProgress.sent + bulkProgress.failed)}</span>
+                      </div>
+                    </div>
+
+                    {/* Contagem regressiva anti-ban */}
+                    {sendingBulk && bulkProgress.currentInterval > 0 && (
+                      <div className="flex items-center justify-center gap-2 p-2 bg-yellow-50 dark:bg-yellow-900/10 border border-yellow-100 dark:border-yellow-900/30 text-yellow-800 dark:text-yellow-400 rounded-lg text-xs font-medium animate-pulse">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        <span>Aguardando {bulkProgress.currentInterval}s para o próximo envio (evitando bloqueios do WhatsApp)...</span>
+                      </div>
+                    )}
+
+                    {isBulkCancelled && (
+                      <div className="p-2 bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/30 text-red-800 dark:text-red-400 rounded-lg text-xs font-semibold text-center">
+                        Envio interrompido pelo usuário. Nenhum outro disparo será feito.
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Lista Detalhada de Contatos */}
+                <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden max-h-[30vh]">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 dark:bg-slate-800/50 sticky top-0">
+                      <tr>
+                        <th className="py-2.5 px-4 font-semibold text-slate-600 dark:text-slate-300">Contato</th>
+                        <th className="py-2.5 px-4 font-semibold text-slate-600 dark:text-slate-300">WhatsApp</th>
+                        <th className="py-2.5 px-4 font-semibold text-slate-600 dark:text-slate-300 text-right">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                      {people
+                        .filter(p => selectedIds.includes(p.id))
+                        .map(person => {
+                          const status = bulkStatusList[person.id] || 'pending';
+                          const error = bulkErrorList[person.id];
+                          return (
+                            <tr key={person.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
+                              <td className="py-2 px-4 font-medium text-slate-800 dark:text-slate-200">{person.full_name}</td>
+                              <td className="py-2 px-4 text-slate-500 dark:text-slate-400">{person.phone ? maskPhone(person.phone) : 'Sem número'}</td>
+                              <td className="py-2 px-4 text-right">
+                                {status === 'success' ? (
+                                  <span className="inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded bg-green-50 text-green-700 dark:bg-green-950/30 dark:text-green-400 border border-green-200 dark:border-green-800/30"><CheckCircle className="h-3 w-3 mr-1"/> Enviado</span>
+                                ) : status === 'sending' ? (
+                                  <span className="inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded bg-blue-50 text-blue-700 dark:bg-blue-950/30 dark:text-blue-400 border border-blue-200 dark:border-blue-800/30"><Loader2 className="h-3 w-3 mr-1 animate-spin"/> Enviando...</span>
+                                ) : status === 'error' ? (
+                                  <span className="inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-400 border border-red-200 dark:border-green-800/30 cursor-pointer" title={error}><AlertCircle className="h-3 w-3 mr-1"/> Falhou</span>
+                                ) : (
+                                  <span className="text-[10px] font-semibold text-slate-400">Pendente</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="flex justify-between items-center pt-4 border-t border-slate-100 dark:border-slate-800">
+                <div>
+                  {sendingBulk && (
+                    <button
+                      onClick={() => {
+                        isCancelledRef.current = true;
+                        setIsBulkCancelled(true);
+                      }}
+                      className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-semibold transition-colors flex items-center gap-1.5 shadow-sm"
+                    >
+                      Interromper Envio
+                    </button>
+                  )}
+                </div>
+                <div className="flex gap-3">
+                  <button 
+                    onClick={() => setShowBulkSmsModal(false)} 
+                    disabled={sendingBulk}
+                    className="px-4 py-2 text-sm font-medium border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
+                  >
+                    Fechar
+                  </button>
+                  {!sendingBulk && (
+                    <button 
+                      onClick={sendBulkWhatsApp} 
+                      disabled={!bulkMessage.trim() || selectedIds.length === 0}
+                      className="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50"
+                    >
+                      <Send className="h-4 w-4" />
+                      Iniciar Envio
+                    </button>
+                  )}
+                </div>
               </div>
             </motion.div>
           </div>
