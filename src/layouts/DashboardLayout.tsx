@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Users, CalendarDays, Laptop, FileText, StickyNote,
   Bell, Moon, Sun, LogOut, Settings,
   Shield, Puzzle, UsersRound, ChevronDown, ChevronRight, ScrollText, Clock,
-  CheckSquare
+  CheckSquare, Cake, Send, CheckCircle, AlertCircle, Loader2
 } from 'lucide-react';
 import ProfileScreen    from '../pages/ProfileScreen';
 import AccessProfiles   from '../pages/admin/AccessProfiles';
@@ -22,6 +22,8 @@ import AtendimentoScreen from '../pages/AtendimentoScreen';
 import AnotacoesScreen    from '../pages/AnotacoesScreen';
 import OficiosScreen      from '../pages/OficiosScreen';
 import ConfigOficiosScreen from '../pages/admin/ConfigOficiosScreen';
+import ConfigAniversariosScreen from '../pages/admin/ConfigAniversariosScreen';
+import { maskPhone } from '../utils/validators';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface DashboardLayoutProps {
@@ -43,11 +45,12 @@ const ALL_SIDEBAR_ITEMS = [
 ];
 
 const CONFIG_ITEMS = [
-  { id: 'config/perfis',    label: 'Perfis de Acesso',     icon: Shield },
-  { id: 'config/modulos',   label: 'Módulos',              icon: Puzzle },
-  { id: 'config/usuarios',  label: 'Gestão de Usuários',   icon: UsersRound },
-  { id: 'config/oficios',   label: 'Sequência de Ofícios',  icon: FileText },
-  { id: 'config/logs',      label: 'Logs de Atividade',    icon: ScrollText },
+  { id: 'config/perfis',       label: 'Perfis de Acesso',     icon: Shield },
+  { id: 'config/modulos',      label: 'Módulos',              icon: Puzzle },
+  { id: 'config/usuarios',     label: 'Gestão de Usuários',   icon: UsersRound },
+  { id: 'config/aniversarios', label: 'Aniversários',         icon: Cake },
+  { id: 'config/oficios',      label: 'Sequência de Ofícios',  icon: FileText },
+  { id: 'config/logs',         label: 'Logs de Atividade',    icon: ScrollText },
 ];
 
 // ─── Error Boundary ─────────────────────────────────────────────────────────────
@@ -65,19 +68,20 @@ const renderContent = (activeMenu: string, children: React.ReactNode) => {
   return (
     <ErrorBoundary>
       {(() => {
-        if (activeMenu === 'perfil')           return <ProfileScreen />;
-        if (activeMenu === 'pessoas')          return <PeopleScreen />;
-        if (activeMenu === 'agenda')           return <AgendaScreen />;
-        if (activeMenu === 'anotacoes')        return <AnotacoesScreen />;
-        if (activeMenu === 'auto-atendimento') return <AtendimentoScreen />;
-        if (activeMenu === 'requerimentos')    return <RequerimentosScreen />;
-        if (activeMenu === 'demandas')         return <DemandasScreen />;
-        if (activeMenu === 'oficios')          return <OficiosScreen />;
-        if (activeMenu === 'config/perfis')    return <AccessProfiles />;
-        if (activeMenu === 'config/modulos')   return <ModulesScreen />;
-        if (activeMenu === 'config/usuarios')  return <UsersManagement />;
-        if (activeMenu === 'config/oficios')   return <ConfigOficiosScreen />;
-        if (activeMenu === 'config/logs')      return <ActivityLogsScreen />;
+        if (activeMenu === 'perfil')              return <ProfileScreen />;
+        if (activeMenu === 'pessoas')             return <PeopleScreen />;
+        if (activeMenu === 'agenda')              return <AgendaScreen />;
+        if (activeMenu === 'anotacoes')           return <AnotacoesScreen />;
+        if (activeMenu === 'auto-atendimento')    return <AtendimentoScreen />;
+        if (activeMenu === 'requerimentos')       return <RequerimentosScreen />;
+        if (activeMenu === 'demandas')            return <DemandasScreen />;
+        if (activeMenu === 'oficios')             return <OficiosScreen />;
+        if (activeMenu === 'config/perfis')       return <AccessProfiles />;
+        if (activeMenu === 'config/modulos')      return <ModulesScreen />;
+        if (activeMenu === 'config/usuarios')     return <UsersManagement />;
+        if (activeMenu === 'config/aniversarios') return <ConfigAniversariosScreen />;
+        if (activeMenu === 'config/oficios')      return <ConfigOficiosScreen />;
+        if (activeMenu === 'config/logs')         return <ActivityLogsScreen />;
         if (activeMenu === 'no-access') {
           return (
             <div className="flex flex-col items-center justify-center h-full text-slate-500">
@@ -141,6 +145,12 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children, onLogout })
   const [showNotifications, setShowNotifications] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
 
+  // Aniversariantes
+  const [birthdayList, setBirthdayList] = useState<any[]>([]);
+  const [showBirthdays, setShowBirthdays] = useState(false);
+  const [sendingBirthdayId, setSendingBirthdayId] = useState<string | null>(null);
+  const [birthdayStatus, setBirthdayStatus] = useState<Record<string, { status: 'success' | 'error'; error?: string }>>({});
+
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
@@ -153,6 +163,81 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children, onLogout })
   }, [userModules, isAdmin]);
 
   const isConfigActive = activeMenu.startsWith('config/');
+
+  // Buscar aniversariantes de hoje
+  const fetchBirthdays = async () => {
+    try {
+      const { data, error } = await supabase.rpc('get_aniversariantes_hoje');
+      if (!error && data) {
+        setBirthdayList(data);
+      }
+    } catch (err) {
+      console.error('Erro ao buscar aniversariantes no cabeçalho:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchBirthdays();
+  }, []);
+
+  const handleSendBirthdayWpp = async (person: any) => {
+    if (!person.phone) return;
+    setSendingBirthdayId(person.id);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token || '';
+
+      const res = await fetch('https://ggzineqxakpwafoyuzxe.supabase.co/functions/v1/send-birthday-wpp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          targetId: person.id,
+          targetType: person.tipo
+        })
+      });
+
+      const json = await res.json();
+      if (!res.ok || json.success === false) {
+        throw new Error(json.error || 'Falha ao enviar mensagem');
+      }
+
+      setBirthdayStatus(prev => ({
+        ...prev,
+        [person.id]: { status: 'success' }
+      }));
+    } catch (err: any) {
+      console.error('Erro no envio de WhatsApp de aniversário:', err);
+      setBirthdayStatus(prev => ({
+        ...prev,
+        [person.id]: { status: 'error', error: err.message }
+      }));
+    } finally {
+      setSendingBirthdayId(null);
+    }
+  };
+
+  // Helper de cálculo de idade
+  const getAge = (dateStr: string) => {
+    if (!dateStr) return null;
+    const parts = dateStr.split('-');
+    if (parts.length < 3) return null;
+    const birthYear = parseInt(parts[0], 10);
+    const today = new Date();
+    const age = today.getFullYear() - birthYear;
+    return age > 0 ? age : null;
+  };
+
+  const formatBirthdayDate = (dateStr: string) => {
+    if (!dateStr) return '';
+    const parts = dateStr.split('-');
+    if (parts.length >= 3) {
+      return `${parts[2]}/${parts[1]}`;
+    }
+    return dateStr;
+  };
 
   // Badge: compromissos de hoje com lembrar=true
   useEffect(() => {
@@ -325,9 +410,159 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children, onLogout })
             <button onClick={toggleDarkMode} className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
               {isDarkMode ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
             </button>
+
+            {/* ── Ícone e Pop-up de Aniversariantes ── */}
             <div className="relative">
               <button 
-                onClick={() => setShowNotifications(!showNotifications)}
+                onClick={() => {
+                  setShowBirthdays(!showBirthdays);
+                  if (showNotifications) setShowNotifications(false);
+                }}
+                title="Aniversariantes do Dia"
+                className={`p-2 relative rounded-full transition-colors ${
+                  showBirthdays 
+                    ? 'bg-pink-50 text-pink-600 dark:bg-pink-900/30 dark:text-pink-400' 
+                    : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                <Cake className="h-5 w-5" />
+                {birthdayList.length > 0 && (
+                  <span className="absolute top-1.5 right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-pink-600 text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-white dark:ring-slate-900 leading-none">
+                    {birthdayList.length > 9 ? '9+' : birthdayList.length}
+                  </span>
+                )}
+              </button>
+
+              <AnimatePresence>
+                {showBirthdays && (
+                  <>
+                    <div 
+                      className="fixed inset-0 z-40" 
+                      onClick={() => setShowBirthdays(false)} 
+                    />
+                    <motion.div
+                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                      className="absolute right-0 mt-2 w-96 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl z-50 overflow-hidden"
+                    >
+                      <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-gradient-to-r from-pink-50/50 via-white to-transparent dark:from-pink-950/20 dark:via-slate-900 dark:to-transparent">
+                        <h3 className="font-heading font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                          <Cake className="h-4 w-4 text-pink-600 dark:text-pink-400" />
+                          Aniversariantes de Hoje
+                        </h3>
+                        {birthdayList.length > 0 ? (
+                          <span className="text-[10px] bg-pink-100 dark:bg-pink-900/40 text-pink-700 dark:text-pink-300 px-2.5 py-0.5 rounded-full font-bold">
+                            {birthdayList.length} HOJE
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-slate-400">0 Hoje</span>
+                        )}
+                      </div>
+
+                      <div className="max-h-[380px] overflow-y-auto divide-y divide-slate-50 dark:divide-slate-800">
+                        {birthdayList.length === 0 ? (
+                          <div className="p-8 text-center">
+                            <div className="w-12 h-12 bg-pink-50 dark:bg-pink-900/20 rounded-full flex items-center justify-center mx-auto mb-3">
+                              <Cake className="h-6 w-6 text-pink-400 dark:text-pink-500" />
+                            </div>
+                            <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Nenhum aniversariante hoje</p>
+                            <p className="text-xs text-slate-400 mt-1">Todos os aniversariantes do dia aparecerão aqui para felicitação rápida.</p>
+                          </div>
+                        ) : (
+                          birthdayList.map((person) => {
+                            const status = birthdayStatus[person.id];
+                            const isSending = sendingBirthdayId === person.id;
+                            const age = getAge(person.birth_date);
+                            const hasPhone = Boolean(person.phone);
+
+                            return (
+                              <div 
+                                key={person.id}
+                                className="p-3.5 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors flex items-center justify-between gap-3"
+                              >
+                                <div className="flex items-center gap-3 min-w-0">
+                                  <div className="w-9 h-9 rounded-full bg-pink-100 dark:bg-pink-900/30 text-pink-600 dark:text-pink-400 flex items-center justify-center font-bold text-xs shrink-0">
+                                    {person.full_name ? person.full_name.slice(0, 2).toUpperCase() : '🎂'}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <p className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                                        {person.full_name}
+                                      </p>
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 font-medium">
+                                        {person.tipo}
+                                      </span>
+                                    </div>
+                                    <p className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                      <span>🎂 {formatBirthdayDate(person.birth_date)} {age ? `(${age} anos)` : ''}</span>
+                                      {person.responsavel_nome && (
+                                        <span className="text-slate-400 text-[10px]">({person.responsavel_nome})</span>
+                                      )}
+                                      {person.phone && (
+                                        <span className="text-slate-400 font-mono text-[10px]">• {maskPhone(person.phone)}</span>
+                                      )}
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <div className="shrink-0">
+                                  {status?.status === 'success' ? (
+                                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 px-2.5 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-800/60">
+                                      <CheckCircle className="h-3.5 w-3.5" />
+                                      Enviado
+                                    </span>
+                                  ) : (
+                                    <button
+                                      onClick={() => handleSendBirthdayWpp(person)}
+                                      disabled={isSending || !hasPhone}
+                                      title={!hasPhone ? 'Sem WhatsApp cadastrado' : 'Enviar parabéns no WhatsApp'}
+                                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-100 dark:disabled:bg-slate-800 text-white disabled:text-slate-400 rounded-lg text-xs font-semibold shadow-sm transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                                    >
+                                      {isSending ? (
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                      ) : status?.status === 'error' ? (
+                                        <AlertCircle className="h-3.5 w-3.5 text-red-200" />
+                                      ) : (
+                                        <Send className="h-3.5 w-3.5" />
+                                      )}
+                                      <span>
+                                        {!hasPhone ? 'Sem WPP' : status?.status === 'error' ? 'Tentar de novo' : 'WhatsApp'}
+                                      </span>
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+
+                      {isAdmin && (
+                        <button 
+                          onClick={() => {
+                            setActiveMenu('config/aniversarios');
+                            setShowBirthdays(false);
+                          }}
+                          className="w-full p-2.5 bg-slate-50 dark:bg-slate-800/50 text-center text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-pink-600 dark:hover:text-pink-400 transition-colors border-t border-slate-100 dark:border-slate-800 flex items-center justify-center gap-1.5"
+                        >
+                          <Settings className="h-3.5 w-3.5" />
+                          Configurações de Aniversário
+                        </button>
+                      )}
+                    </motion.div>
+                  </>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* ── Ícone e Pop-up de Lembretes ── */}
+            <div className="relative">
+              <button 
+                onClick={() => {
+                  setShowNotifications(!showNotifications);
+                  if (showBirthdays) setShowBirthdays(false);
+                }}
                 className={`p-2 relative rounded-full transition-colors ${
                   showNotifications 
                     ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400' 
